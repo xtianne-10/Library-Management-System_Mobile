@@ -34,7 +34,10 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _error = error);
       return;
     }
-    Navigator.pushReplacementNamed(context, '/home');
+    final isLibrarian =
+        AuthService.instance.currentUser?.role == UserRole.librarian;
+    Navigator.pushReplacementNamed(
+        context, isLibrarian ? '/librarian' : '/home');
   }
 
   @override
@@ -124,7 +127,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Demo: student@hogwarts.com / hogwarts1',
+                      'Demo: student@hogwarts.com or librarian@hogwarts.com / hogwarts1',
                       style: TextStyle(fontSize: 12, color: Palette.textMuted),
                     ),
                   ],

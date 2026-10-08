@@ -5,6 +5,7 @@ import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/app_nav_bar.dart';
 import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/services/auth_service.dart';
+import 'package:library_management_system_mobile/services/library_service.dart';
 
 // Home
 
@@ -31,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    BookRepository.loadBooks().then((books) {
+    LibraryService.instance.ensureLoaded().then((books) {
       if (!mounted) return;
       setState(() {
         _books = books;

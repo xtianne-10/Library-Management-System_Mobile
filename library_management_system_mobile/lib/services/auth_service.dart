@@ -67,6 +67,14 @@ class AuthService extends ChangeNotifier {
       phone: '09393883413',
       password: 'hogwarts1',
     ),
+    const AppUser(
+      firstName: 'Aila Jeane',
+      lastName: 'Telebrico',
+      email: 'librarian@hogwarts.com',
+      phone: '09171234567',
+      password: 'hogwarts1',
+      role: UserRole.librarian,
+    ),
   ];
 
   AppUser? _current;

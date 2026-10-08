@@ -42,4 +42,59 @@ class Validators {
     if (s != original) return 'Passwords do not match.';
     return null;
   }
+
+  // ---- Book form (same rules as HomeLibrarian.jsx) ----
+
+  static String? bookTitle(String? v) {
+    final s = (v ?? '').trim();
+    if (s.isEmpty) return 'Book title is required.';
+    if (s.length < 2) return 'Title must be at least 2 characters.';
+    if (s.length > 100) return 'Title must be 100 characters or fewer.';
+    return null;
+  }
+
+  static String? bookAuthor(String? v) {
+    final s = (v ?? '').trim();
+    if (s.isEmpty) return 'Author name is required.';
+    if (!RegExp(r"^\p{L}[\p{L}\s.'-]*$", unicode: true).hasMatch(s)) {
+      return 'Use letters only.';
+    }
+    if (s.length > 60) return 'Keep it under 60 characters.';
+    return null;
+  }
+
+  static String? publisher(String? v) {
+    final s = (v ?? '').trim();
+    if (s.isEmpty) return 'Publisher is required.';
+    if (s.length > 60) return 'Keep it under 60 characters.';
+    return null;
+  }
+
+  static String? category(String? v) =>
+      (v == null || v.isEmpty) ? 'Choose a category.' : null;
+
+  static String? publishedDate(DateTime? d) {
+    if (d == null) return 'Pick a publish date.';
+    if (d.isAfter(DateTime.now())) return "Date can't be in the future.";
+    return null;
+  }
+
+  static String? description(String? v) {
+    final s = (v ?? '').trim();
+    if (s.isEmpty) return 'Description is required.';
+    if (s.length < 10) return 'Write at least 10 characters.';
+    if (s.length > 300) return 'Keep it under 300 characters.';
+    return null;
+  }
+
+  /// Optional field.
+  static String? imageUrl(String? v) {
+    final s = (v ?? '').trim();
+    if (s.isEmpty) return null;
+    final u = Uri.tryParse(s);
+    if (u == null || !(u.scheme == 'http' || u.scheme == 'https') || u.host.isEmpty) {
+      return 'Enter a valid image link (https://...).';
+    }
+    return null;
+  }
 }

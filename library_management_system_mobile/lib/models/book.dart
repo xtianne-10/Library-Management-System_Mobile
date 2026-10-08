@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
@@ -16,6 +17,10 @@ class Book {
     this.copiesAvailable = 1,
     this.isNewArrival = false,
     this.isPopular = false,
+    this.publisher = '',
+    this.published,
+    this.imageUrl = '',
+    this.imageBytes,
   });
 
   final int id;
@@ -30,8 +35,43 @@ class Book {
   final int copiesAvailable;
   final bool isNewArrival;
   final bool isPopular;
+  final String publisher;
+  final DateTime? published;
+  final String imageUrl;
+  final Uint8List? imageBytes; // picked from gallery
 
   bool get available => copiesAvailable > 0;
+
+  Book copyWith({
+    int? id,
+    String? title,
+    String? author,
+    String? category,
+    String? description,
+    String? publisher,
+    DateTime? published,
+    String? imageUrl,
+    Uint8List? imageBytes,
+    bool clearImageBytes = false,
+  }) =>
+      Book(
+        id: id ?? this.id,
+        title: title ?? this.title,
+        author: author ?? this.author,
+        category: category ?? this.category,
+        color: color,
+        description: description ?? this.description,
+        year: year,
+        pages: pages,
+        totalCopies: totalCopies,
+        copiesAvailable: copiesAvailable,
+        isNewArrival: isNewArrival,
+        isPopular: isPopular,
+        publisher: publisher ?? this.publisher,
+        published: published ?? this.published,
+        imageUrl: imageUrl ?? this.imageUrl,
+        imageBytes: clearImageBytes ? null : (imageBytes ?? this.imageBytes),
+      );
 
   factory Book.fromJson(Map<String, dynamic> json) => Book(
         id: json['id'] as int,
@@ -46,6 +86,9 @@ class Book {
         copiesAvailable: json['copiesAvailable'] as int? ?? 1,
         isNewArrival: json['isNewArrival'] as bool? ?? false,
         isPopular: json['isPopular'] as bool? ?? false,
+        publisher: json['publisher'] as String? ?? '',
+        published: DateTime.tryParse(json['published'] as String? ?? ''),
+        imageUrl: json['imageUrl'] as String? ?? '',
       );
 }
 

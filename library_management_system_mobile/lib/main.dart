@@ -8,6 +8,7 @@ import 'package:library_management_system_mobile/screens/explore.dart';
 import 'package:library_management_system_mobile/screens/my_books.dart';
 import 'package:library_management_system_mobile/screens/profile.dart';
 import 'package:library_management_system_mobile/screens/booklist.dart';
+import 'package:library_management_system_mobile/screens/librarian.dart';
 
 void main() {
   runApp(const MyApp());
@@ -78,6 +79,7 @@ class MyApp extends StatelessWidget {
         "/explore": (context) => ExploreScreen(),
         "/mybooks": (context) => MyBooksScreen(),
         "/profile": (context) => const ProfileScreen(),
+        '/librarian': (_) => const LibrarianScreen(),
         // "/booklist": (context) => BookList(),
       },
     );

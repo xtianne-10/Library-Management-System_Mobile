@@ -193,8 +193,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     final user = AuthService.instance.currentUser;
 
+    final isLibrarian = user?.role == UserRole.librarian;
+
     return Scaffold(
-      bottomNavigationBar: const AppNavBar(currentIndex: 3),
+      appBar: isLibrarian
+          ? AppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                tooltip: 'Back',
+                onPressed: () => Navigator.maybePop(context),
+              ),
+              title: const Text('Back'),
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              foregroundColor: Palette.burgundy,
+            )
+          : null,
+      bottomNavigationBar:
+          isLibrarian ? null : const AppNavBar(currentIndex: 3),
       body: SafeArea(
         child: user == null
             ? const Center(child: CircularProgressIndicator())
