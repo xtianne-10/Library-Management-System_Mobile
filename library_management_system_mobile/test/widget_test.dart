@@ -3,14 +3,16 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:library_management_system_mobile/main.dart';
 
-/// Uses a tall test screen so the whole ListView is built at once
-/// (ListView only builds children that are near the viewport).
 Future<void> pumpApp(WidgetTester tester) async {
   tester.view.physicalSize = const Size(800, 3000);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
 
-  await tester.pumpWidget(const LibraryApp());
+  await tester.pumpWidget(const MyApp());
+
+  await tester.runAsync(
+      () => Future.delayed(const Duration(milliseconds: 100)));
+  await tester.pumpAndSettle();
 }
 
 void main() {

@@ -3,88 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/app_nav_bar.dart';
-
-// BOOKS
-
-class Book {
-  const Book({
-    required this.title,
-    required this.author,
-    required this.category,
-    required this.color,
-    this.available = true,
-  });
-
-  final String title;
-  final String author;
-  final String category;
-  final Color color;
-  final bool available;
-}
-
-const _categories = ['All', 'Fiction', 'Science', 'History', 'Mystery'];
-
-const _newArrivals = [
-  Book(
-    title: 'Frankenstein',
-    author: 'Mary Shelley',
-    category: 'Fiction',
-    color: Palette.slytherin,
-  ),
-  Book(
-    title: 'The Time Machine',
-    author: 'H. G. Wells',
-    category: 'Science',
-    color: Palette.ravenclaw,
-  ),
-  Book(
-    title: 'Dracula',
-    author: 'Bram Stoker',
-    category: 'Fiction',
-    color: Palette.burgundy,
-    available: false,
-  ),
-  Book(
-    title: 'Moby-Dick',
-    author: 'Herman Melville',
-    category: 'Fiction',
-    color: Color(0xFF1B2A41),
-  ),
-];
-
-const _popular = [
-  Book(
-    title: 'Jane Eyre',
-    author: 'Charlotte Brontë',
-    category: 'Fiction',
-    color: Palette.gryffindor,
-  ),
-  Book(
-    title: 'The Hound of the Baskervilles',
-    author: 'Arthur Conan Doyle',
-    category: 'Mystery',
-    color: Palette.slytherin,
-  ),
-  Book(
-    title: 'On the Origin of Species',
-    author: 'Charles Darwin',
-    category: 'Science',
-    color: Palette.ravenclaw,
-    available: false,
-  ),
-  Book(
-    title: 'The Histories',
-    author: 'Herodotus',
-    category: 'History',
-    color: Color(0xFFB36A0B),
-  ),
-  Book(
-    title: 'Emma',
-    author: 'Jane Austen',
-    category: 'Fiction',
-    color: Palette.burgundy,
-  ),
-];
+import 'package:library_management_system_mobile/models/book.dart';
 
 // Home
 
@@ -97,6 +16,27 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _selectedCategory = 'All';
+  List<Book> _books = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    BookRepository.loadBooks().then((books) {
+      if (!mounted) return;
+      setState(() {
+        _books = books;
+        _loading = false;
+      });
+    }).catchError((Object e) {
+      debugPrint('Failed to load books: $e');
+      if (!mounted) return;
+      setState(() => _loading = false);
+    });
+  }
+
+  List<Book> get _newArrivals => _books.where((b) => b.isNewArrival).toList();
+  List<Book> get _popular => _books.where((b) => b.isPopular).toList();
 
   List<Book> get _filteredPopular => _selectedCategory == 'All'
       ? _popular
@@ -106,6 +46,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final topInset = MediaQuery.of(context).padding.top;
+
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+        bottomNavigationBar: AppNavBar(currentIndex: 0),
+      );
+    }
+
+    // Categories come from books.json, not a hard-coded list.
+    final categories = categoriesOf(_books);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light, // light status bar icons on burgundy
@@ -200,11 +150,11 @@ class _HomeScreenState extends State<HomeScreen> {
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: _categories.length,
+                itemCount: categories.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 8),
                 itemBuilder: (context, i) {
-                  final c = _categories[i];
-                  final color = categoryColor(c);
+                  final c = categories[i];
+                  final color = categoryChipColor(c);
                   final selected = c == _selectedCategory;
                   return ChoiceChip(
                     label: Text(c),
