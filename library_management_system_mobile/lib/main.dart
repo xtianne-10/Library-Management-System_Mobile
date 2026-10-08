@@ -70,14 +70,14 @@ class MyApp extends StatelessWidget {
           style: TextButton.styleFrom(foregroundColor: Palette.amber),
         ),
       ),
-      initialRoute: "/home",
+      initialRoute: "/login",
       routes: {
-        // "/register": (context) => RegisterState(),
-        // "/login": (context) => LoginState(),
+        "/register": (context) => const RegisterScreen(),
+        "/login": (context) => const LoginScreen(),
         "/home": (context) => HomeScreen(),
         "/explore": (context) => ExploreScreen(),
         "/mybooks": (context) => MyBooksScreen(),
-        // "/profile": (context) => const ProfileScreen(),
+        "/profile": (context) => const ProfileScreen(),
         // "/booklist": (context) => BookList(),
       },
     );

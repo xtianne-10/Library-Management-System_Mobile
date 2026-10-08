@@ -4,8 +4,17 @@ import 'package:flutter/services.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/app_nav_bar.dart';
 import 'package:library_management_system_mobile/models/book.dart';
+import 'package:library_management_system_mobile/services/auth_service.dart';
 
 // Home
+
+// Greeting based on the time of day.
+String _greeting() {
+  final h = DateTime.now().hour;
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -46,6 +55,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final topInset = MediaQuery.of(context).padding.top;
+    final user = AuthService.instance.currentUser;
+    final firstName = (user?.firstName.trim().isNotEmpty ?? false)
+        ? user!.firstName.trim()
+        : 'Reader';
 
     if (_loading) {
       return const Scaffold(
@@ -81,7 +94,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Good morning, User',
+                            Text('${_greeting()}, $firstName',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: text.headlineSmall?.copyWith(
                                   fontWeight: FontWeight.w700,
                                   color: Palette.creamLight,
@@ -94,16 +109,21 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                       ),
-                      const CircleAvatar(
+                      CircleAvatar(
                         radius: 22,
                         backgroundColor: Palette.cream,
-                        child: Text(
-                          'U',
-                          style: TextStyle(
-                            color: Palette.burgundy,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
+                        backgroundImage: user?.avatar != null
+                            ? MemoryImage(user!.avatar!)
+                            : null,
+                        child: user?.avatar == null
+                            ? Text(
+                                user?.initial ?? '?',
+                                style: const TextStyle(
+                                  color: Palette.burgundy,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              )
+                            : null,
                       ),
                     ],
                   ),
