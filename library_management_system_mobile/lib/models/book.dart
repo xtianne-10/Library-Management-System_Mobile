@@ -52,6 +52,8 @@ class Book {
     DateTime? published,
     String? imageUrl,
     Uint8List? imageBytes,
+    int? totalCopies,
+    int? copiesAvailable,
     bool clearImageBytes = false,
   }) =>
       Book(
@@ -63,8 +65,8 @@ class Book {
         description: description ?? this.description,
         year: year,
         pages: pages,
-        totalCopies: totalCopies,
-        copiesAvailable: copiesAvailable,
+        totalCopies: totalCopies ?? this.totalCopies,
+        copiesAvailable: copiesAvailable ?? this.copiesAvailable,
         isNewArrival: isNewArrival,
         isPopular: isPopular,
         publisher: publisher ?? this.publisher,

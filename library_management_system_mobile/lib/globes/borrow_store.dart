@@ -1,20 +1,26 @@
 import 'package:flutter/foundation.dart';
+
 import 'package:library_management_system_mobile/models/book.dart';
+import 'package:library_management_system_mobile/services/auth_service.dart';
+import 'package:library_management_system_mobile/services/library_service.dart';
 
 DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
+/// Read-only view of one transaction, for the student screens.
 class BorrowedBook {
-  BorrowedBook({
+  const BorrowedBook({
+    required this.txId,
     required this.book,
     required this.borrowedOn,
     required this.dueOn,
     this.returnedOn,
   });
 
+  final int txId;
   final Book book;
   final DateTime borrowedOn;
   final DateTime dueOn;
-  DateTime? returnedOn;
+  final DateTime? returnedOn;
 
   bool get isReturned => returnedOn != null;
 
@@ -26,24 +32,40 @@ class BorrowedBook {
   double get fine => daysOverdue * BorrowStore.finePerDay;
 }
 
+/// The signed-in student's loans. Data lives in LibraryService.
 class BorrowStore extends ChangeNotifier {
-  BorrowStore._();
+  BorrowStore._() {
+    LibraryService.instance.addListener(notifyListeners);
+    AuthService.instance.addListener(notifyListeners);
+  }
   static final BorrowStore instance = BorrowStore._();
 
-  static const loanDays = 14;
-  static const finePerDay = 5.0;
+  static const loanDays = LibraryService.loanDays;
+  static const finePerDay = LibraryService.finePerDay;
 
-  final List<BorrowedBook> _all = [];
+  List<BorrowedBook> get _all {
+    final user = AuthService.instance.currentUser;
+    if (user == null) return const [];
+    final lib = LibraryService.instance;
+    return [
+      for (final t in lib.recordsOf(user.email))
+        BorrowedBook(
+          txId: t.id,
+          book: t.book,
+          borrowedOn: t.borrowedOn,
+          dueOn: _dateOnly(t.due),
+          returnedOn: t.returnedOn,
+        ),
+    ];
+  }
 
   // Every book not yet returned (current + overdue).
-  List<BorrowedBook> get items =>
-      List.unmodifiable(_all.where((e) => !e.isReturned));
+  List<BorrowedBook> get items => _all.where((e) => !e.isReturned).toList();
 
   List<BorrowedBook> get current =>
       _all.where((e) => !e.isReturned && !e.isOverdue).toList();
 
-  List<BorrowedBook> get overdue =>
-      _all.where((e) => e.isOverdue).toList();
+  List<BorrowedBook> get overdue => _all.where((e) => e.isOverdue).toList();
 
   List<BorrowedBook> get history {
     final list = _all.where((e) => e.isReturned).toList();
@@ -51,42 +73,23 @@ class BorrowStore extends ChangeNotifier {
     return list;
   }
 
-  String _key(Book b) => '${b.title}|${b.author}';
+  bool isBorrowed(Book b) => _all.any((e) => !e.isReturned && e.book.id == b.id);
 
-  bool isBorrowed(Book b) =>
-      _all.any((e) => !e.isReturned && _key(e.book) == _key(b));
-
-  // Returns false if the book already borrowed
-  // [borrowedOn] for testing overdue books.
+  /// Returns false if blocked (already borrowed, limit, overdue, no copies).
   bool borrow(Book b, {DateTime? borrowedOn}) {
-    if (isBorrowed(b)) return false;
-    final start = _dateOnly(borrowedOn ?? DateTime.now());
-    _all.add(BorrowedBook(
-      book: b,
-      borrowedOn: start,
-      dueOn: start.add(const Duration(days: loanDays)),
-    ));
-    notifyListeners();
-    return true;
+    final user = AuthService.instance.currentUser;
+    if (user == null) return false;
+    return LibraryService.instance.checkOut(b, user, borrowedOn: borrowedOn) ==
+        null;
   }
 
-  // Copies still on the shelf after subtracting active loans
-  int copiesLeft(Book b) {
-    final taken =
-        _all.where((e) => !e.isReturned && _key(e.book) == _key(b)).length;
-    final left = b.copiesAvailable - taken;
-    return left < 0 ? 0 : left;
-  }
+  int copiesLeft(Book b) => LibraryService.instance.copiesLeft(b);
 
   bool isAvailable(Book b) => copiesLeft(b) > 0;
 
   void giveBack(Book b) {
-    for (final e in _all) {
-      if (!e.isReturned && _key(e.book) == _key(b)) {
-        e.returnedOn = DateTime.now();
-        break;
-      }
-    }
-    notifyListeners();
+    final user = AuthService.instance.currentUser;
+    if (user == null) return;
+    LibraryService.instance.returnLatest(b, user.email);
   }
 }

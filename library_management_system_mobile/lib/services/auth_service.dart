@@ -81,6 +81,10 @@ class AuthService extends ChangeNotifier {
   AppUser? get currentUser => _current;
   bool get isLoggedIn => _current != null;
 
+  /// All student accounts (for the librarian's lookup).
+  List<AppUser> get students =>
+      _users.where((u) => u.role == UserRole.student).toList();
+
   String _norm(String email) => email.trim().toLowerCase();
 
   /// Returns an error message, or null on success.

@@ -122,7 +122,7 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
                           separatorBuilder: (_, __) =>
                               const SizedBox(height: 14),
                           itemBuilder: (context, i) => _LoanCard(
-                            key: ObjectKey(loans[i]),
+                            key: ValueKey(loans[i].txId),
                             loan: loans[i],
                           ),
                         ),

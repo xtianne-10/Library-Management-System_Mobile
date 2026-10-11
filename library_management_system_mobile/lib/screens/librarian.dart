@@ -34,6 +34,27 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   String _sortKey = 'title';
   bool _asc = true;
   String _txFilter = 'All Statuses';
+  String _studentQuery = '';
+
+  static const _pageSize = 5;
+  int _catalogPage = 0;
+  int _studentPage = 0;
+  int _txPage = 0;
+
+  int _clampPage(int page, int total) {
+    final pages = (total / _pageSize).ceil();
+    if (pages <= 1) return 0;
+    return page.clamp(0, pages - 1);
+  }
+
+  // Returns just the items for the current page.
+  List<T> _slice<T>(List<T> list, int page) {
+    final p = _clampPage(page, list.length);
+    final start = p * _pageSize;
+    if (start >= list.length) return const [];
+    final end = (start + _pageSize).clamp(0, list.length);
+    return list.sublist(start, end);
+  }
 
   static const _sortOptions = {
     'title': 'Title',
@@ -75,7 +96,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         'publisher' => b.publisher,
         'category' => b.category,
         'published' => b.published?.toIso8601String() ?? '',
-        'status' => b.available ? 'Available' : 'Unavailable',
+        'status' => _lib.isAvailable(b) ? 'Available' : 'Unavailable',
         _ => b.title,
       };
 
@@ -135,6 +156,12 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   }
 
   Future<void> _confirmDelete(Book b) async {
+    if (_lib.activeFor(b) > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('This book is currently borrowed and can\'t be deleted.'),
+      ));
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -156,23 +183,71 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     if (ok == true) _lib.remove(b.id);
   }
 
+  Future<void> _openIssue({Book? book, AppUser? student}) async {
+    final msg = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _IssueSheet(book: book, student: student),
+    );
+    if (msg != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  void _returnTx(BookTransaction t) {
+    final fine = t.fine;
+    final err = _lib.returnBook(t.id);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(err ??
+          (fine > 0
+              ? 'Returned "${t.title}". Fine due: ₱${fine.toStringAsFixed(2)}.'
+              : 'Returned "${t.title}".')),
+    ));
+  }
+
+  Future<void> _openStudent(AppUser s) => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => _StudentSheet(
+          email: s.email,
+          onReturn: _returnTx,
+          onIssue: (st) => _openIssue(student: st),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     if (!_isLibrarian) return const Scaffold();
 
     final books = _visibleBooks;
     final tx = _lib.transactions
-        .where((t) => _txFilter == 'All Statuses' || t.status == _txFilter)
+        .where((t) =>
+            _txFilter == 'All Statuses' ||
+            (_txFilter == 'Overdue' ? t.overdue : t.status == _txFilter))
         .toList();
     final all = _lib.books;
+    final allStudents = AuthService.instance.students;
+    final sq = _studentQuery.trim().toLowerCase();
+    final foundStudents = allStudents
+        .where((s) =>
+            sq.isEmpty ||
+            s.fullName.toLowerCase().contains(sq) ||
+            s.email.toLowerCase().contains(sq) ||
+            s.phone.contains(sq))
+        .toList();
     final stats = [
-      ('Total Books', all.length, const Color(0xFFE4F1EE)),
-      ('Borrowed', _lib.transactions.where((t) => !t.returned).length,
+      ('Total Books', '${all.length}', const Color(0xFFE4F1EE)),
+      ('Borrowed', '${_lib.transactions.where((t) => !t.returned).length}',
           const Color(0xFFDEDAF4)),
-      ('Overdue', _lib.transactions.where((t) => t.overdue).length,
+      ('Overdue', '${_lib.transactions.where((t) => t.overdue).length}',
           const Color(0xFFFFADAD)),
-      ('Available', all.where((b) => b.available).length,
+      ('Available', '${all.where((b) => _lib.isAvailable(b)).length}',
           const Color(0xFFFFD6A5)),
+      ('Students', '${allStudents.length}', const Color(0xFFD7ECFF)),
+      ('Fines Due', '₱${_lib.outstandingFines.toStringAsFixed(0)}',
+          const Color(0xFFF6D6E8)),
     ];
     final text = Theme.of(context).textTheme;
 
@@ -241,12 +316,29 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           ),
           const SizedBox(height: 28),
 
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () => _openIssue(),
+              icon: const Icon(Icons.assignment_ind_outlined),
+              label: const Text('Issue Book to Student'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Palette.burgundy,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
           // ---- Catalog ----
           Text('Book Catalog',
               style: text.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 10),
           TextField(
-            onChanged: (v) => setState(() => _query = v),
+            onChanged: (v) => setState(() {
+              _query = v;
+              _catalogPage = 0;
+            }),
             decoration: const InputDecoration(
               hintText: 'Search by title or author',
               prefixIcon: Icon(Icons.search),
@@ -269,14 +361,20 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                     for (final e in _sortOptions.entries)
                       DropdownMenuItem(value: e.key, child: Text(e.value)),
                   ],
-                  onChanged: (v) => setState(() => _sortKey = v ?? 'title'),
+                  onChanged: (v) => setState(() {
+                    _sortKey = v ?? 'title';
+                    _catalogPage = 0;
+                  }),
                 ),
               ),
               const SizedBox(width: 8),
               IconButton.outlined(
                 tooltip: _asc ? 'A to Z' : 'Z to A',
                 icon: Icon(_asc ? Icons.arrow_upward : Icons.arrow_downward),
-                onPressed: () => setState(() => _asc = !_asc),
+                onPressed: () => setState(() {
+                  _asc = !_asc;
+                  _catalogPage = 0;
+                }),
               ),
             ],
           ),
@@ -294,12 +392,60 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               ),
             )
           else
-            for (final b in books)
-              _CatalogCard(
-                book: b,
-                onEdit: () => _openForm(b),
-                onDelete: () => _confirmDelete(b),
+            ...[
+              for (final b in _slice(books, _catalogPage))
+                _CatalogCard(
+                  book: b,
+                  left: _lib.copiesLeft(b),
+                  onIssue: () => _openIssue(book: b),
+                  onEdit: () => _openForm(b),
+                  onDelete: () => _confirmDelete(b),
+                ),
+              _Pager(
+                page: _clampPage(_catalogPage, books.length),
+                total: books.length,
+                pageSize: _pageSize,
+                onChanged: (p) => setState(() => _catalogPage = p),
               ),
+            ],
+          const SizedBox(height: 28),
+
+          // ---- Student lookup ----
+          Text('Student Lookup',
+              style: text.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          TextField(
+            onChanged: (v) => setState(() {
+              _studentQuery = v;
+              _studentPage = 0;
+            }),
+            decoration: const InputDecoration(
+              hintText: 'Search by name, email, or phone',
+              prefixIcon: Icon(Icons.person_search),
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (foundStudents.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(
+                child: Text('No students found.',
+                    style: TextStyle(color: Palette.textMuted)),
+              ),
+            )
+          else
+            ...[
+              for (final s in _slice(foundStudents, _studentPage))
+                _StudentCard(student: s, onTap: () => _openStudent(s)),
+              _Pager(
+                page: _clampPage(_studentPage, foundStudents.length),
+                total: foundStudents.length,
+                pageSize: _pageSize,
+                onChanged: (p) => setState(() => _studentPage = p),
+              ),
+            ],
           const SizedBox(height: 28),
 
           // ---- Transactions ----
@@ -310,10 +456,13 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
             value: _txFilter,
             decoration: const InputDecoration(
                 isDense: true, border: OutlineInputBorder()),
-            items: const ['All Statuses', 'Not Returned', 'Returned']
+            items: const ['All Statuses', 'Not Returned', 'Overdue', 'Returned']
                 .map((s) => DropdownMenuItem(value: s, child: Text(s)))
                 .toList(),
-            onChanged: (v) => setState(() => _txFilter = v ?? 'All Statuses'),
+            onChanged: (v) => setState(() {
+              _txFilter = v ?? 'All Statuses';
+              _txPage = 0;
+            }),
           ),
           const SizedBox(height: 12),
           if (tx.isEmpty)
@@ -329,28 +478,16 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               ),
             )
           else
-            for (final t in tx)
-              Card(
-                elevation: 0,
-                color: Palette.card,
-                child: ListTile(
-                  title: Text(t.title,
-                      style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text(
-                    '${t.borrower}\nBorrowed ${_fmt(t.borrowedOn)} · Due ${_fmt(t.due)}'
-                    '${t.returned ? '\nReturned ${_fmt(t.returnedOn)}' : ''}',
-                  ),
-                  isThreeLine: true,
-                  trailing: _Badge(
-                    t.overdue ? 'Overdue' : t.status,
-                    t.overdue
-                        ? const Color(0xFFC0121F)
-                        : t.returned
-                            ? const Color(0xFF0C7A43)
-                            : const Color(0xFFEEA51C),
-                  ),
-                ),
+            ...[
+              for (final t in _slice(tx, _txPage))
+                _TxCard(tx: t, onReturn: () => _returnTx(t)),
+              _Pager(
+                page: _clampPage(_txPage, tx.length),
+                total: tx.length,
+                pageSize: _pageSize,
+                onChanged: (p) => setState(() => _txPage = p),
               ),
+            ],
         ],
       ),
     );
@@ -406,9 +543,16 @@ class _Cover extends StatelessWidget {
 }
 
 class _CatalogCard extends StatelessWidget {
-  const _CatalogCard(
-      {required this.book, required this.onEdit, required this.onDelete});
+  const _CatalogCard({
+    required this.book,
+    required this.left,
+    required this.onIssue,
+    required this.onEdit,
+    required this.onDelete,
+  });
   final Book book;
+  final int left;
+  final VoidCallback onIssue;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -443,10 +587,27 @@ class _CatalogCard extends StatelessWidget {
                     ].join(' · '),
                     style: const TextStyle(fontSize: 12),
                   ),
+                  const SizedBox(height: 4),
+                  Text('$left of ${book.totalCopies} copies available',
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
-                  book.available
-                      ? const _Badge('Available', Color(0xFF0C7A43))
-                      : const _Badge('Unavailable', Color(0xFFEEA51C)),
+                  Row(
+                    children: [
+                      left > 0
+                          ? const _Badge('Available', Color(0xFF0C7A43))
+                          : const _Badge('Unavailable', Color(0xFFEEA51C)),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: left > 0 ? onIssue : null,
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          foregroundColor: Palette.burgundy,
+                        ),
+                        child: const Text('Issue'),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -462,6 +623,448 @@ class _CatalogCard extends StatelessWidget {
                     color: const Color(0xFFC0121F),
                     icon: const Icon(Icons.delete_outline)),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TxCard extends StatelessWidget {
+  const _TxCard({required this.tx, required this.onReturn});
+  final BookTransaction tx;
+  final VoidCallback onReturn;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tx;
+    const red = Color(0xFFC0121F);
+    final color = t.overdue
+        ? red
+        : t.returned
+            ? const Color(0xFF0C7A43)
+            : const Color(0xFFEEA51C);
+
+    return Card(
+      elevation: 0,
+      color: Palette.card,
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(t.title,
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                ),
+                _Badge(t.overdue ? 'Overdue' : t.status, color),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text('${t.borrower} (${t.borrowerEmail})',
+                style: const TextStyle(fontSize: 13)),
+            Text('Borrowed ${_fmt(t.borrowedOn)} · Due ${_fmt(t.due)}',
+                style:
+                    const TextStyle(fontSize: 12, color: Palette.textMuted)),
+            if (t.returned)
+              Text('Returned ${_fmt(t.returnedOn)}',
+                  style:
+                      const TextStyle(fontSize: 12, color: Palette.textMuted)),
+            if (t.fine > 0)
+              Text(
+                'Fine: ₱${t.fine.toStringAsFixed(2)} '
+                '(${t.daysOverdue} ${t.daysOverdue == 1 ? 'day' : 'days'} late)'
+                '${t.finePaid ? ' · PAID' : ''}',
+                style: TextStyle(
+                    fontSize: 13,
+                    color: t.finePaid ? const Color(0xFF0C7A43) : red,
+                    fontWeight: FontWeight.w700),
+              ),
+            if (t.returned && t.fine > 0 && !t.finePaid)
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.tonal(
+                  onPressed: () {
+                    final err = LibraryService.instance.payFine(t.id);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(err ??
+                          'Fine of ₱${t.fine.toStringAsFixed(2)} marked as paid.'),
+                    ));
+                  },
+                  child: const Text('Mark fine paid'),
+                ),
+              ),
+            if (!t.returned)
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.tonal(
+                  onPressed: onReturn,
+                  child: const Text('Mark returned'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Prev / Next control. Hides itself when everything fits on one page.
+class _Pager extends StatelessWidget {
+  const _Pager({
+    required this.page,
+    required this.total,
+    required this.pageSize,
+    required this.onChanged,
+  });
+
+  final int page; // zero-based
+  final int total;
+  final int pageSize;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = (total / pageSize).ceil();
+    if (pages <= 1) return const SizedBox.shrink();
+
+    final first = page * pageSize + 1;
+    final last = ((page + 1) * pageSize).clamp(0, total);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                tooltip: 'Previous page',
+                onPressed: page > 0 ? () => onChanged(page - 1) : null,
+                icon: const Icon(Icons.chevron_left),
+                color: Palette.burgundy,
+              ),
+              Text('Page ${page + 1} of $pages',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              IconButton(
+                tooltip: 'Next page',
+                onPressed: page < pages - 1 ? () => onChanged(page + 1) : null,
+                icon: const Icon(Icons.chevron_right),
+                color: Palette.burgundy,
+              ),
+            ],
+          ),
+          Text('Showing $first–$last of $total',
+              style: const TextStyle(fontSize: 12, color: Palette.textMuted)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Paged list of transactions (used inside the student sheet).
+class _PagedTxList extends StatefulWidget {
+  const _PagedTxList({required this.records, required this.onReturn});
+  final List<BookTransaction> records;
+  final void Function(BookTransaction) onReturn;
+
+  @override
+  State<_PagedTxList> createState() => _PagedTxListState();
+}
+
+class _PagedTxListState extends State<_PagedTxList> {
+  static const _size = 3;
+  int _page = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final all = widget.records;
+    final pages = (all.length / _size).ceil();
+    final page = pages <= 1 ? 0 : _page.clamp(0, pages - 1);
+    final start = page * _size;
+    final end = (start + _size).clamp(0, all.length);
+
+    return Column(
+      children: [
+        for (final t in all.sublist(start, end))
+          _TxCard(tx: t, onReturn: () => widget.onReturn(t)),
+        _Pager(
+          page: page,
+          total: all.length,
+          pageSize: _size,
+          onChanged: (p) => setState(() => _page = p),
+        ),
+      ],
+    );
+  }
+}
+
+class _StudentCard extends StatelessWidget {
+  const _StudentCard({required this.student, required this.onTap});
+  final AppUser student;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final lib = LibraryService.instance;
+    final active = lib.activeLoansOf(student.email);
+    final overdue = active.where((t) => t.overdue).length;
+
+    return Card(
+      elevation: 0,
+      color: Palette.card,
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        onTap: onTap,
+        title: Text(student.fullName,
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: Text('${student.email}\n${student.phone}'),
+        isThreeLine: true,
+        trailing: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _Badge('${active.length}/${LibraryService.maxActiveLoans} books',
+                Palette.burgundy),
+            if (overdue > 0) ...[
+              const SizedBox(height: 4),
+              _Badge('$overdue overdue', const Color(0xFFC0121F)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StudentSheet extends StatelessWidget {
+  const _StudentSheet({
+    required this.email,
+    required this.onReturn,
+    required this.onIssue,
+  });
+  final String email;
+  final void Function(BookTransaction) onReturn;
+  final void Function(AppUser) onIssue;
+
+  @override
+  Widget build(BuildContext context) {
+    final lib = LibraryService.instance;
+    return ListenableBuilder(
+      listenable: lib,
+      builder: (context, _) {
+        final s = lib.studentByEmail(email);
+        if (s == null) return const SizedBox.shrink();
+        final records = lib.recordsOf(email);
+        final problem = lib.eligibility(s);
+        final fines = lib.finesOutstanding(email);
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(s.fullName,
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.w700)),
+                  ),
+                  IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close)),
+                ],
+              ),
+              Text('${s.email} · ${s.phone}',
+                  style: const TextStyle(color: Palette.textMuted)),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: (problem == null
+                          ? const Color(0xFF0C7A43)
+                          : const Color(0xFFC0121F))
+                      .withAlpha(30),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  problem == null ? 'Eligible to borrow' : problem,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: problem == null
+                        ? const Color(0xFF0C7A43)
+                        : const Color(0xFFC0121F),
+                  ),
+                ),
+              ),
+              if (fines > 0) ...[
+                const SizedBox(height: 8),
+                Text('Outstanding fines: ₱${fines.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                        color: Color(0xFFC0121F), fontWeight: FontWeight.w700)),
+              ],
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => onIssue(s),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Issue a book'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Palette.burgundy,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text('Borrowing records',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 10),
+              if (records.isEmpty)
+                const Text('No borrowing records yet.',
+                    style: TextStyle(color: Palette.textMuted))
+              else
+                _PagedTxList(records: records, onReturn: onReturn),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _IssueSheet extends StatefulWidget {
+  const _IssueSheet({this.book, this.student});
+  final Book? book;
+  final AppUser? student;
+
+  @override
+  State<_IssueSheet> createState() => _IssueSheetState();
+}
+
+class _IssueSheetState extends State<_IssueSheet> {
+  final _lib = LibraryService.instance;
+  String? _email;
+  int? _bookId;
+
+  @override
+  void initState() {
+    super.initState();
+    _email = widget.student?.email;
+    _bookId = widget.book?.id;
+  }
+
+  Book? get _book {
+    for (final b in _lib.books) {
+      if (b.id == _bookId) return b;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final students = AuthService.instance.students;
+    final student = _email == null ? null : _lib.studentByEmail(_email!);
+    final book = _book;
+    final problem =
+        (student != null && book != null) ? _lib.eligibility(student, book) : null;
+    final ready = student != null && book != null && problem == null;
+    final due = DateTime.now().add(const Duration(days: LibraryService.loanDays));
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Issue Book',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                ),
+                IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _email,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                  labelText: 'Student',
+                  isDense: true,
+                  border: OutlineInputBorder()),
+              items: [
+                for (final s in students)
+                  DropdownMenuItem(
+                    value: s.email,
+                    child: Text('${s.fullName} · ${s.email}',
+                        overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _email = v),
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<int>(
+              value: _bookId,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                  labelText: 'Book',
+                  isDense: true,
+                  border: OutlineInputBorder()),
+              items: [
+                for (final b in _lib.books)
+                  DropdownMenuItem(
+                    value: b.id,
+                    child: Text('${b.title} (${_lib.copiesLeft(b)} left)',
+                        overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _bookId = v),
+            ),
+            const SizedBox(height: 14),
+            if (problem != null)
+              Text(problem,
+                  style: const TextStyle(
+                      color: Color(0xFFC0121F), fontWeight: FontWeight.w600))
+            else if (ready)
+              Text(
+                'Eligible. Due date will be ${_fmt(due)} '
+                '(${LibraryService.loanDays} days). '
+                'Late fine: ₱${LibraryService.finePerDay.toStringAsFixed(0)}/day.',
+                style: const TextStyle(
+                    color: Color(0xFF0C7A43), fontWeight: FontWeight.w600),
+              ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: ready
+                    ? () {
+                        final err = _lib.checkOut(book, student);
+                        Navigator.pop(
+                          context,
+                          err ??
+                              'Issued "${book.title}" to ${student.fullName}. '
+                                  'Due ${_fmt(due)}.',
+                        );
+                      }
+                    : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: Palette.amber,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Confirm borrow'),
+              ),
             ),
           ],
         ),
@@ -488,6 +1091,8 @@ class _BookFormState extends State<_BookForm> {
   late final _publisher = TextEditingController(text: widget.book?.publisher);
   late final _desc = TextEditingController(text: widget.book?.description);
   late final _image = TextEditingController(text: widget.book?.imageUrl);
+  late final _copies =
+      TextEditingController(text: '${widget.book?.totalCopies ?? 1}');
   late final _dateCtl = TextEditingController(
       text: widget.book?.published == null ? '' : _fmt(widget.book!.published));
 
@@ -510,7 +1115,7 @@ class _BookFormState extends State<_BookForm> {
 
   @override
   void dispose() {
-    for (final c in [_title, _author, _publisher, _desc, _image, _dateCtl]) {
+    for (final c in [_title, _author, _publisher, _desc, _image, _dateCtl, _copies]) {
       c.dispose();
     }
     super.dispose();
@@ -556,6 +1161,8 @@ class _BookFormState extends State<_BookForm> {
         publisher: _publisher.text.trim(),
         category: _category,
         published: _published,
+        totalCopies: int.parse(_copies.text.trim()),
+        copiesAvailable: int.parse(_copies.text.trim()),
         description: _desc.text.trim(),
         imageUrl: _bytes != null ? '' : _image.text.trim(),
         imageBytes: _bytes,
@@ -642,6 +1249,14 @@ class _BookFormState extends State<_BookForm> {
                 decoration: _dec('Date Published').copyWith(
                     suffixIcon: const Icon(Icons.calendar_today, size: 18)),
                 validator: (_) => Validators.publishedDate(_published),
+                autovalidateMode: auto,
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _copies,
+                keyboardType: TextInputType.number,
+                decoration: _dec('Number of Copies', hint: 'e.g. 3'),
+                validator: Validators.copies,
                 autovalidateMode: auto,
               ),
               const SizedBox(height: 14),

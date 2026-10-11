@@ -87,6 +87,13 @@ class Validators {
     return null;
   }
 
+  static String? copies(String? v) {
+    final n = int.tryParse((v ?? '').trim());
+    if (n == null) return 'Enter a number.';
+    if (n < 1 || n > 99) return 'Use 1 to 99.';
+    return null;
+  }
+
   /// Optional field.
   static String? imageUrl(String? v) {
     final s = (v ?? '').trim();

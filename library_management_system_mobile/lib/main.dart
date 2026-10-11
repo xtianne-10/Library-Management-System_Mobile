@@ -9,6 +9,7 @@ import 'package:library_management_system_mobile/screens/my_books.dart';
 import 'package:library_management_system_mobile/screens/profile.dart';
 import 'package:library_management_system_mobile/screens/booklist.dart';
 import 'package:library_management_system_mobile/screens/librarian.dart';
+import 'package:library_management_system_mobile/services/auth_service.dart';
 
 void main() {
   runApp(const MyApp());
@@ -75,13 +76,38 @@ class MyApp extends StatelessWidget {
       routes: {
         "/register": (context) => const RegisterScreen(),
         "/login": (context) => const LoginScreen(),
-        "/home": (context) => HomeScreen(),
-        "/explore": (context) => ExploreScreen(),
-        "/mybooks": (context) => MyBooksScreen(),
+        "/home": (context) =>
+            RoleGuard(allow: UserRole.student, child: HomeScreen()),
+        "/explore": (context) =>
+            RoleGuard(allow: UserRole.student, child: ExploreScreen()),
+        "/mybooks": (context) =>
+            RoleGuard(allow: UserRole.student, child: MyBooksScreen()),
         "/profile": (context) => const ProfileScreen(),
-        '/librarian': (_) => const LibrarianScreen(),
+        '/librarian': (_) =>
+            const RoleGuard(allow: UserRole.librarian, child: LibrarianScreen()),
         // "/booklist": (context) => BookList(),
       },
     );
+  }
+}
+
+/// Sends users to the right place if their role doesn't match the screen.
+class RoleGuard extends StatelessWidget {
+  const RoleGuard({super.key, required this.allow, required this.child});
+  final UserRole allow;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = AuthService.instance.currentUser;
+    if (user != null && user.role == allow) return child;
+
+    final target = user == null
+        ? '/login'
+        : (user.role == UserRole.librarian ? '/librarian' : '/home');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (context.mounted) Navigator.pushReplacementNamed(context, target);
+    });
+    return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
 }

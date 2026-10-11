@@ -118,10 +118,11 @@ void showBookDetails(BuildContext context, Book book) {
                           : () {
                               Navigator.pop(sheetContext);
                               if (canBorrow) {
-                                BorrowStore.instance.borrow(book);
+                                final ok = BorrowStore.instance.borrow(book);
                                 messenger.showSnackBar(SnackBar(
-                                  content: Text(
-                                      'Borrowed "${book.title}". Due in ${BorrowStore.loanDays} days.'),
+                                  content: Text(ok
+                                      ? 'Borrowed "${book.title}". Due in ${BorrowStore.loanDays} days.'
+                                      : 'Can\'t borrow "${book.title}": limit reached or overdue books.'),
                                 ));
                               } else {
                                 messenger.showSnackBar(SnackBar(
