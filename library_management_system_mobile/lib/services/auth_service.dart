@@ -2,7 +2,15 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
-enum UserRole { student, librarian }
+enum UserRole { student, professor, librarian }
+
+const yearLevelOptions = [
+  '1st Year',
+  '2nd Year',
+  '3rd Year',
+  '4th Year',
+  '5th Year',
+];
 
 class AppUser {
   const AppUser({
@@ -13,6 +21,11 @@ class AppUser {
     required this.password,
     this.role = UserRole.student,
     this.avatar,
+    this.idNumber = '',
+    this.course = '',
+    this.yearLevel = '',
+    this.department = '',
+    this.assignedRole = '',
   });
 
   final String firstName;
@@ -22,12 +35,16 @@ class AppUser {
   final String password;
   final UserRole role;
 
-  /// Profile picture bytes (null = show the initial instead).
   final Uint8List? avatar;
+
+  final String idNumber;
+  final String course;
+  final String yearLevel;
+  final String department;
+  final String assignedRole;
 
   String get fullName => '$firstName $lastName'.trim();
 
-  /// First letter for the avatar circle.
   String get initial =>
       firstName.isNotEmpty ? firstName[0].toUpperCase() : '?';
 
@@ -38,6 +55,11 @@ class AppUser {
     String? phone,
     Uint8List? avatar,
     bool clearAvatar = false,
+    String? idNumber,
+    String? course,
+    String? yearLevel,
+    String? department,
+    String? assignedRole,
   }) =>
       AppUser(
         firstName: firstName ?? this.firstName,
@@ -47,25 +69,38 @@ class AppUser {
         password: password,
         role: role,
         avatar: clearAvatar ? null : (avatar ?? this.avatar),
+        idNumber: idNumber ?? this.idNumber,
+        course: course ?? this.course,
+        yearLevel: yearLevel ?? this.yearLevel,
+        department: department ?? this.department,
+        assignedRole: assignedRole ?? this.assignedRole,
       );
 }
 
-/// In-memory auth. There is no backend yet (the web version only
-/// console.logs), so accounts live only while the app is running.
-/// Swap the bodies of register/login/updateProfile for real API calls later;
-/// the screens won't need to change.
 class AuthService extends ChangeNotifier {
   AuthService._();
   static final AuthService instance = AuthService._();
 
   final List<AppUser> _users = [
-    // Demo account so you can test login without signing up first.
     const AppUser(
       firstName: 'Zoe Claudette',
       lastName: 'Reynaldo',
       email: 'student@hogwarts.com',
       phone: '09393883413',
       password: 'hogwarts1',
+      idNumber: '2023-152669',
+      course: 'BSIT-MWA',
+      yearLevel: '4th Year',
+    ),
+    const AppUser(
+      firstName: 'Christianne Marie',
+      lastName: 'Navarro',
+      email: 'professor@hogwarts.com',
+      phone: '09209606155',
+      password: 'hogwarts1',
+      role: UserRole.professor,
+      idNumber: '2023-151496',
+      department: 'School of Information Technology',
     ),
     const AppUser(
       firstName: 'Aila Jeane',
@@ -74,6 +109,8 @@ class AuthService extends ChangeNotifier {
       phone: '09171234567',
       password: 'hogwarts1',
       role: UserRole.librarian,
+      idNumber: '2023-154214',
+      assignedRole: 'Head Librarian',
     ),
   ];
 
@@ -81,13 +118,14 @@ class AuthService extends ChangeNotifier {
   AppUser? get currentUser => _current;
   bool get isLoggedIn => _current != null;
 
-  /// All student accounts (for the librarian's lookup).
   List<AppUser> get students =>
       _users.where((u) => u.role == UserRole.student).toList();
 
+  List<AppUser> get professors =>
+      _users.where((u) => u.role == UserRole.professor).toList();
+
   String _norm(String email) => email.trim().toLowerCase();
 
-  /// Returns an error message, or null on success.
   String? register(AppUser user) {
     final email = _norm(user.email);
     if (_users.any((u) => _norm(u.email) == email)) {
@@ -97,7 +135,6 @@ class AuthService extends ChangeNotifier {
     return null;
   }
 
-  /// Returns an error message, or null on success.
   String? login(String email, String password) {
     final e = _norm(email);
     for (final u in _users) {
@@ -115,7 +152,6 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Sets (or removes, when [bytes] is null) the profile picture.
   void updateAvatar(Uint8List? bytes) {
     final me = _current;
     if (me == null) return;
@@ -126,12 +162,16 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Returns an error message, or null on success.
   String? updateProfile({
     required String firstName,
     required String lastName,
     required String email,
     required String phone,
+    String? idNumber,
+    String? course,
+    String? yearLevel,
+    String? department,
+    String? assignedRole,
   }) {
     final me = _current;
     if (me == null) return 'You are not signed in.';
@@ -144,6 +184,11 @@ class AuthService extends ChangeNotifier {
       lastName: lastName.trim(),
       email: newEmail,
       phone: phone.trim(),
+      idNumber: idNumber?.trim(),
+      course: course?.trim(),
+      yearLevel: yearLevel?.trim(),
+      department: department?.trim(),
+      assignedRole: assignedRole?.trim(),
     );
     final i = _users.indexWhere((u) => identical(u, me));
     if (i != -1) _users[i] = updated;

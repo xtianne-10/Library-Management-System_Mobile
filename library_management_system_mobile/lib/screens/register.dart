@@ -23,12 +23,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _password = TextEditingController();
   final _confirm = TextEditingController();
 
-  UserRole? _role; // null = still on the "I am a:" step
+  final _id = TextEditingController();
+  final _course = TextEditingController();
+  final _department = TextEditingController();
+  final _assignedRole = TextEditingController();
+  String? _yearLevel;
+
+  UserRole? _role;
   String? _error;
 
   @override
   void dispose() {
-    for (final c in [_first, _last, _email, _phone, _password, _confirm]) {
+    for (final c in [
+      _first,
+      _last,
+      _email,
+      _phone,
+      _password,
+      _confirm,
+      _id,
+      _course,
+      _department,
+      _assignedRole,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -38,13 +55,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
 
+    final role = _role!;
     final error = AuthService.instance.register(AppUser(
       firstName: _first.text.trim(),
       lastName: _last.text.trim(),
       email: _email.text.trim(),
       phone: _phone.text.trim(),
       password: _password.text,
-      role: _role!,
+      role: role,
+      idNumber: _id.text.trim(),
+      course: role == UserRole.student ? _course.text.trim() : '',
+      yearLevel: role == UserRole.student ? (_yearLevel ?? '') : '',
+      department: role == UserRole.professor ? _department.text.trim() : '',
+      assignedRole:
+          role == UserRole.librarian ? _assignedRole.text.trim() : '',
     ));
     if (error != null) {
       setState(() => _error = error);
@@ -55,6 +79,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
     Navigator.pushReplacementNamed(context, '/login');
   }
+
+  String _roleLabel(UserRole role) => switch (role) {
+        UserRole.student => 'Student',
+        UserRole.professor => 'Professor',
+        UserRole.librarian => 'Librarian',
+      };
 
   Widget _signInLink() => Row(
         children: [
@@ -109,10 +139,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         const SizedBox(height: 28),
         const Text('I am a:', style: TextStyle(fontSize: 18, color: _fg)),
         const SizedBox(height: 14),
-        Row(
+        Wrap(
+          spacing: 16,
+          runSpacing: 16,
           children: [
             card(UserRole.student, 'Student', Icons.school),
-            const SizedBox(width: 16),
+            card(UserRole.professor, 'Professor', Icons.person_pin),
             card(UserRole.librarian, 'Librarian', Icons.local_library),
           ],
         ),
@@ -120,7 +152,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
+  Widget _yearLevelField() {
+    UnderlineInputBorder line(Color c, [double w = 1]) =>
+        UnderlineInputBorder(borderSide: BorderSide(color: c, width: w));
+
+    return DropdownButtonFormField<String>(
+      value: _yearLevel,
+      dropdownColor: Palette.burgundy,
+      iconEnabledColor: _fg,
+      style: const TextStyle(fontSize: 17, color: _fg),
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      decoration: InputDecoration(
+        hintText: 'Year level',
+        hintStyle: TextStyle(color: _fg.withValues(alpha: 0.6)),
+        prefixIcon: const Icon(Icons.grade_outlined, size: 20, color: _fg),
+        enabledBorder: line(_fg.withValues(alpha: 0.7)),
+        focusedBorder: line(_fg, 1.5),
+        errorBorder: line(authErrorOnDark),
+        focusedErrorBorder: line(authErrorOnDark, 1.5),
+        errorStyle: const TextStyle(color: authErrorOnDark),
+      ),
+      items: [
+        for (final y in yearLevelOptions)
+          DropdownMenuItem(value: y, child: Text(y)),
+      ],
+      onChanged: (v) => setState(() => _yearLevel = v),
+      validator: (v) => v == null ? 'Choose your year level.' : null,
+    );
+  }
+
   Widget _formStep() {
+    final role = _role!;
+    final isStudent = role == UserRole.student;
+
     Widget field(
       TextEditingController c,
       String hint,
@@ -143,6 +207,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
           onSubmitted: onSubmitted,
           validator: validator,
         );
+
+    const gap = SizedBox(height: 16);
+    final idLabel = isStudent ? 'Student ID' : 'Employee ID';
 
     return Form(
       key: _formKey,
@@ -168,16 +235,46 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          field(_email, 'Enter your email', Validators.email,
-              icon: Icons.mail_outline, type: TextInputType.emailAddress),
-          const SizedBox(height: 16),
+          gap,
+          field(_id, 'Enter your $idLabel',
+              (v) => Validators.idNumber(v, idLabel),
+              icon: Icons.badge_outlined),
+          gap,
+          field(
+              _email,
+              isStudent ? 'Enter your email' : 'Enter your faculty email',
+              Validators.email,
+              icon: Icons.mail_outline,
+              type: TextInputType.emailAddress),
+          gap,
+
+          if (role == UserRole.student) ...[
+            field(_course, 'Enter your course',
+                (v) => Validators.required(v, 'Course'),
+                icon: Icons.menu_book_outlined),
+            gap,
+            _yearLevelField(),
+            gap,
+          ],
+          if (role == UserRole.professor) ...[
+            field(_department, 'Enter your department',
+                (v) => Validators.required(v, 'Department'),
+                icon: Icons.apartment_outlined),
+            gap,
+          ],
+          if (role == UserRole.librarian) ...[
+            field(_assignedRole, 'Enter your assigned role',
+                (v) => Validators.required(v, 'Assigned role'),
+                icon: Icons.work_outline),
+            gap,
+          ],
+
           field(_phone, 'Enter your Phone Number', Validators.phone,
               icon: Icons.phone_outlined, type: TextInputType.phone),
-          const SizedBox(height: 16),
+          gap,
           field(_password, 'Enter your password', Validators.password,
               icon: Icons.lock_outline, password: true),
-          const SizedBox(height: 16),
+          gap,
           field(_confirm, 'Confirm your password',
               (v) => Validators.confirmPassword(v, _password.text),
               icon: Icons.lock_outline,
@@ -206,10 +303,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
             onPressed: () => setState(() {
               _role = null;
               _error = null;
+              _yearLevel = null;
             }),
             style: TextButton.styleFrom(foregroundColor: _fg),
             child: Text(
-              'Change account type (${_role!.name})',
+              'Change account type (${_roleLabel(role)})',
               style: const TextStyle(decoration: TextDecoration.underline),
             ),
           ),

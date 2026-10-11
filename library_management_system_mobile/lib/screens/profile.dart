@@ -10,7 +10,6 @@ import 'package:library_management_system_mobile/globes/borrow_store.dart';
 import 'package:library_management_system_mobile/globes/favorites_store.dart';
 import 'package:library_management_system_mobile/screens/favorites.dart';
 
-
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -25,6 +24,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _email = TextEditingController();
   final _phone = TextEditingController();
 
+  // Role details
+  final _id = TextEditingController();
+  final _course = TextEditingController();
+  final _year = TextEditingController();
+  final _department = TextEditingController();
+  final _assigned = TextEditingController();
+
   final _picker = ImagePicker();
   bool _editing = false;
   String? _error;
@@ -33,7 +39,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadFromUser();
-    // Not signed in -> back to login.
     if (!AuthService.instance.isLoggedIn) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.pushReplacementNamed(context, '/login');
@@ -48,11 +53,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _last.text = u.lastName;
     _email.text = u.email;
     _phone.text = u.phone;
+    _id.text = u.idNumber;
+    _course.text = u.course;
+    _year.text = u.yearLevel;
+    _department.text = u.department;
+    _assigned.text = u.assignedRole;
   }
 
   @override
   void dispose() {
-    for (final c in [_first, _last, _email, _phone]) {
+    for (final c in [
+      _first,
+      _last,
+      _email,
+      _phone,
+      _id,
+      _course,
+      _year,
+      _department,
+      _assigned,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -64,7 +84,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       });
 
   void _cancelEdit() {
-    // reset() clears the controllers, so reload the saved values after it.
     _formKey.currentState?.reset();
     _loadFromUser();
     setState(() {
@@ -82,6 +101,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       lastName: _last.text,
       email: _email.text,
       phone: _phone.text,
+      idNumber: _id.text,
+      course: _course.text,
+      yearLevel: _year.text,
+      department: _department.text,
+      assignedRole: _assigned.text,
     );
     if (error != null) {
       setState(() => _error = error);
@@ -108,7 +132,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         maxWidth: 800,
         imageQuality: 85,
       );
-      if (file == null) return; // user cancelled
+      if (file == null) return;
       final bytes = await file.readAsBytes();
       if (!mounted) return;
       AuthService.instance.updateAvatar(bytes);
@@ -194,6 +218,142 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
   }
 
+  // The fields shown for each role
+  List<Widget> _roleFields(UserRole role) {
+    const gap = SizedBox(height: 14);
+
+    final names = <Widget>[
+      _ProfileField(
+        label: 'First name',
+        icon: Icons.person_outline,
+        controller: _first,
+        editing: _editing,
+        validator: (v) => Validators.name(v, 'First name'),
+      ),
+      gap,
+      _ProfileField(
+        label: 'Last name',
+        icon: Icons.badge_outlined,
+        controller: _last,
+        editing: _editing,
+        validator: (v) => Validators.name(v, 'Last name'),
+      ),
+      gap,
+    ];
+
+    final phone = <Widget>[
+      gap,
+      _ProfileField(
+        label: 'Phone number',
+        icon: Icons.phone_outlined,
+        controller: _phone,
+        editing: _editing,
+        keyboardType: TextInputType.phone,
+        validator: Validators.phone,
+      ),
+    ];
+
+    switch (role) {
+      case UserRole.student:
+        return [
+          ...names,
+          _ProfileField(
+            label: 'Student ID',
+            icon: Icons.numbers,
+            controller: _id,
+            editing: _editing,
+            validator: (v) => Validators.idNumber(v, 'Student ID'),
+          ),
+          gap,
+          _ProfileField(
+            label: 'Email',
+            icon: Icons.mail_outline,
+            controller: _email,
+            editing: _editing,
+            keyboardType: TextInputType.emailAddress,
+            validator: Validators.email,
+          ),
+          gap,
+          _ProfileField(
+            label: 'Course',
+            icon: Icons.menu_book_outlined,
+            controller: _course,
+            editing: _editing,
+            validator: (v) => Validators.required(v, 'Course'),
+          ),
+          gap,
+          _ProfileField(
+            label: 'Year level',
+            icon: Icons.grade_outlined,
+            controller: _year,
+            editing: _editing,
+            options: yearLevelOptions,
+            validator: (v) =>
+                (v == null || v.isEmpty) ? 'Choose your year level.' : null,
+          ),
+          ...phone,
+        ];
+      case UserRole.professor:
+        return [
+          ...names,
+          _ProfileField(
+            label: 'Employee ID',
+            icon: Icons.numbers,
+            controller: _id,
+            editing: _editing,
+            validator: (v) => Validators.idNumber(v, 'Employee ID'),
+          ),
+          gap,
+          _ProfileField(
+            label: 'Faculty email',
+            icon: Icons.mail_outline,
+            controller: _email,
+            editing: _editing,
+            keyboardType: TextInputType.emailAddress,
+            validator: Validators.email,
+          ),
+          gap,
+          _ProfileField(
+            label: 'Department',
+            icon: Icons.apartment_outlined,
+            controller: _department,
+            editing: _editing,
+            validator: (v) => Validators.required(v, 'Department'),
+          ),
+          ...phone,
+        ];
+      case UserRole.librarian:
+        return [
+          ...names,
+          _ProfileField(
+            label: 'Employee ID',
+            icon: Icons.numbers,
+            controller: _id,
+            editing: _editing,
+            validator: (v) => Validators.idNumber(v, 'Employee ID'),
+          ),
+          gap,
+          _ProfileField(
+            label: 'Faculty email',
+            icon: Icons.mail_outline,
+            controller: _email,
+            editing: _editing,
+            keyboardType: TextInputType.emailAddress,
+            validator: Validators.email,
+          ),
+          gap,
+          _ProfileField(
+            label: 'Assigned role',
+            icon: Icons.work_outline,
+            controller: _assigned,
+            editing: _editing,
+            validator: (v) => Validators.required(v, 'Assigned role'),
+          ),
+          ...phone,
+        ];
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = AuthService.instance.currentUser;
@@ -202,6 +362,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final isLibrarian = user.role == UserRole.librarian;
+    final roleLabel = switch (user.role) {
+      UserRole.librarian => 'Librarian',
+      UserRole.professor => 'Professor',
+      UserRole.student => 'Student',
+    };
+    final sectionTitle = '$roleLabel profile';
     final topInset = MediaQuery.of(context).padding.top;
     final text = Theme.of(context).textTheme;
 
@@ -283,7 +449,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    Text('${user.firstName} ${user.lastName}'.trim(),
+                    Text(user.fullName,
                         textAlign: TextAlign.center,
                         style: text.headlineSmall?.copyWith(
                           fontWeight: FontWeight.w700,
@@ -298,7 +464,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        isLibrarian ? 'Librarian' : 'Student',
+                        roleLabel,
                         style: text.labelMedium?.copyWith(
                           color: Palette.creamLight,
                           fontWeight: FontWeight.w600,
@@ -309,7 +475,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
 
-              // Stats (only for students)
+              // Stats (students and professors)
               if (!isLibrarian)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -402,51 +568,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
 
-              // Personal information
+              // Role details
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Personal information',
+                    Text(sectionTitle,
                         style: text.titleMedium?.copyWith(
                           fontWeight: FontWeight.w700,
                           color: Palette.burgundy,
                         )),
                     const SizedBox(height: 14),
-                    _ProfileField(
-                      label: 'First name',
-                      icon: Icons.person_outline,
-                      controller: _first,
-                      editing: _editing,
-                      validator: (v) => Validators.name(v, 'First name'),
-                    ),
-                    const SizedBox(height: 14),
-                    _ProfileField(
-                      label: 'Last name',
-                      icon: Icons.badge_outlined,
-                      controller: _last,
-                      editing: _editing,
-                      validator: (v) => Validators.name(v, 'Last name'),
-                    ),
-                    const SizedBox(height: 14),
-                    _ProfileField(
-                      label: 'Email',
-                      icon: Icons.mail_outline,
-                      controller: _email,
-                      editing: _editing,
-                      keyboardType: TextInputType.emailAddress,
-                      validator: Validators.email,
-                    ),
-                    const SizedBox(height: 14),
-                    _ProfileField(
-                      label: 'Phone number',
-                      icon: Icons.phone_outlined,
-                      controller: _phone,
-                      editing: _editing,
-                      keyboardType: TextInputType.phone,
-                      validator: Validators.phone,
-                    ),
+                    ..._roleFields(user.role),
                     if (_error != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
@@ -523,7 +657,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
   }
-  
 }
 
 class _StatTile extends StatelessWidget {
@@ -569,6 +702,7 @@ class _ProfileField extends StatelessWidget {
     required this.editing,
     required this.validator,
     this.keyboardType,
+    this.options,
   });
 
   final String label;
@@ -578,9 +712,68 @@ class _ProfileField extends StatelessWidget {
   final String? Function(String?) validator;
   final TextInputType? keyboardType;
 
+  final List<String>? options;
+
+  InputDecoration _decoration() {
+    final radius = BorderRadius.circular(12);
+    return InputDecoration(
+      filled: true,
+      fillColor: editing ? Colors.white : Palette.card,
+      prefixIcon: Icon(icon, size: 20, color: Palette.burgundy),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: BorderSide(
+          color: editing ? Palette.burgundy : const Color(0x2655161D),
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: const BorderSide(color: Palette.burgundy, width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: BorderSide(color: Colors.red.shade700),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: BorderSide(color: Colors.red.shade700, width: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(12);
+    const style = TextStyle(
+        fontSize: 15, fontWeight: FontWeight.w600, color: Palette.textDark);
+
+    final Widget input;
+    if (editing && options != null) {
+      input = DropdownButtonFormField<String>(
+        value: options!.contains(controller.text) ? controller.text : null,
+        style: style,
+        decoration: _decoration(),
+        items: [
+          for (final o in options!) DropdownMenuItem(value: o, child: Text(o)),
+        ],
+        onChanged: (v) => controller.text = v ?? '',
+        validator: validator,
+        autovalidateMode: AutovalidateMode.onUserInteraction,
+      );
+    } else {
+      input = TextFormField(
+        controller: controller,
+        readOnly: !editing || options != null,
+        keyboardType: keyboardType,
+        validator: validator,
+        autovalidateMode: editing
+            ? AutovalidateMode.onUserInteraction
+            : AutovalidateMode.disabled,
+        style: style,
+        decoration: _decoration(),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -590,44 +783,7 @@ class _ProfileField extends StatelessWidget {
                 fontWeight: FontWeight.w600,
                 color: Palette.textMuted)),
         const SizedBox(height: 6),
-        TextFormField(
-          controller: controller,
-          readOnly: !editing,
-          keyboardType: keyboardType,
-          validator: validator,
-          autovalidateMode: editing
-              ? AutovalidateMode.onUserInteraction
-              : AutovalidateMode.disabled,
-          style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: Palette.textDark),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: editing ? Colors.white : Palette.card,
-            prefixIcon: Icon(icon, size: 20, color: Palette.burgundy),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: radius,
-              borderSide: BorderSide(
-                color: editing ? Palette.burgundy : const Color(0x2655161D),
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: radius,
-              borderSide: const BorderSide(color: Palette.burgundy, width: 2),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: radius,
-              borderSide: BorderSide(color: Colors.red.shade700),
-            ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: radius,
-              borderSide: BorderSide(color: Colors.red.shade700, width: 2),
-            ),
-          ),
-        ),
+        input,
       ],
     );
   }

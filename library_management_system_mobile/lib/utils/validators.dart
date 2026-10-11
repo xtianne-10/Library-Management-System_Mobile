@@ -1,8 +1,7 @@
-// Same rules as the web version (SignUp.jsx / Profile.jsx).
-
 final _emailRe = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]{2,}$');
 final _phoneRe = RegExp(r'^(09\d{9}|\+639\d{9})$');
 final _nameRe = RegExp(r"^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .'-]*$");
+final _idRe = RegExp(r'^[A-Za-z0-9][A-Za-z0-9-]*$');
 
 class Validators {
   static String? name(String? v, String label) {
@@ -43,7 +42,23 @@ class Validators {
     return null;
   }
 
-  // ---- Book form (same rules as HomeLibrarian.jsx) ----
+  static String? idNumber(String? v, String label) {
+    final s = (v ?? '').trim();
+    if (s.isEmpty) return '$label is required.';
+    if (s.length < 4 || s.length > 20) {
+      return '$label must be 4 to 20 characters.';
+    }
+    if (!_idRe.hasMatch(s)) return 'Use letters, numbers and dashes only.';
+    return null;
+  }
+
+  static String? required(String? v, String label) {
+    final s = (v ?? '').trim();
+    if (s.isEmpty) return '$label is required.';
+    if (s.length > 60) return 'Keep it under 60 characters.';
+    return null;
+  }
+
 
   static String? bookTitle(String? v) {
     final s = (v ?? '').trim();

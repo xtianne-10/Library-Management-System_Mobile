@@ -78,15 +78,18 @@ class MyApp extends StatelessWidget {
       routes: {
         "/register": (context) => const RegisterScreen(),
         "/login": (context) => const LoginScreen(),
-        "/home": (context) =>
-            RoleGuard(allow: UserRole.student, child: HomeScreen()),
-        "/explore": (context) =>
-            RoleGuard(allow: UserRole.student, child: ExploreScreen()),
-        "/mybooks": (context) =>
-            RoleGuard(allow: UserRole.student, child: MyBooksScreen()),
+        "/home": (context) => RoleGuard(
+            allow: const [UserRole.student, UserRole.professor],
+            child: HomeScreen()),
+        "/explore": (context) => RoleGuard(
+            allow: const [UserRole.student, UserRole.professor],
+            child: ExploreScreen()),
+        "/mybooks": (context) => RoleGuard(
+            allow: const [UserRole.student, UserRole.professor],
+            child: MyBooksScreen()),
         "/profile": (context) => const ProfileScreen(),
-        '/librarian': (_) =>
-            const RoleGuard(allow: UserRole.librarian, child: LibrarianScreen()),
+        '/librarian': (_) => const RoleGuard(
+            allow: [UserRole.librarian], child: LibrarianScreen()),
         // "/booklist": (context) => BookList(),
       },
     );
@@ -106,13 +109,13 @@ class AppScrollBehavior extends MaterialScrollBehavior {
 // Role Guard
 class RoleGuard extends StatelessWidget {
   const RoleGuard({super.key, required this.allow, required this.child});
-  final UserRole allow;
+  final List<UserRole> allow;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
     final user = AuthService.instance.currentUser;
-    if (user != null && user.role == allow) return child;
+    if (user != null && allow.contains(user.role)) return child;
 
     final target = user == null
         ? '/login'
