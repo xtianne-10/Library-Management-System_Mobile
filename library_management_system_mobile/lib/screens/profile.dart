@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/services.dart';
 
 import 'package:library_management_system_mobile/app_nav_bar.dart';
 import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/utils/validators.dart';
+import 'package:library_management_system_mobile/globes/borrow_store.dart';
+
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -192,191 +195,319 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final user = AuthService.instance.currentUser;
+    if (user == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
-    final isLibrarian = user?.role == UserRole.librarian;
+    final isLibrarian = user.role == UserRole.librarian;
+    final topInset = MediaQuery.of(context).padding.top;
+    final text = Theme.of(context).textTheme;
 
-    return Scaffold(
-      appBar: isLibrarian
-          ? AppBar(
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_back),
-                tooltip: 'Back',
-                onPressed: () => Navigator.maybePop(context),
-              ),
-              title: const Text('Back'),
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              foregroundColor: Palette.burgundy,
-            )
-          : null,
-      bottomNavigationBar:
-          isLibrarian ? null : const AppNavBar(currentIndex: 3),
-      body: SafeArea(
-        child: user == null
-            ? const Center(child: CircularProgressIndicator())
-            : SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: GestureDetector(
-                          onTap: _changePhoto,
-                          child: Stack(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(5),
-                                decoration: const BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Palette.burgundy,
-                                ),
-                                child: CircleAvatar(
-                                  radius: 56,
-                                  backgroundColor: Palette.cream,
-                                  backgroundImage: user.avatar != null
-                                      ? MemoryImage(user.avatar!)
-                                      : null,
-                                  child: user.avatar == null
-                                      ? Text(
-                                          user.initial,
-                                          style: const TextStyle(
-                                            fontSize: 48,
-                                            color: Palette.burgundy,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        )
-                                      : null,
-                                ),
-                              ),
-                              const Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: CircleAvatar(
-                                  radius: 18,
-                                  backgroundColor: Palette.amber,
-                                  child: Icon(Icons.camera_alt,
-                                      size: 18, color: Colors.white),
-                                ),
-                              ),
-                            ],
-                          ),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: Palette.page,
+        bottomNavigationBar:
+            isLibrarian ? null : const AppNavBar(currentIndex: 3),
+        body: Form(
+          key: _formKey,
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              // Header: avatar, name, role
+              Container(
+                width: double.infinity,
+                padding: EdgeInsets.fromLTRB(20, topInset + 8, 20, 28),
+                decoration: const BoxDecoration(
+                  color: Palette.burgundy,
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(28),
+                    bottomRight: Radius.circular(28),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    if (isLibrarian)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: IconButton(
+                          icon: const Icon(Icons.arrow_back),
+                          color: Palette.creamLight,
+                          tooltip: 'Back',
+                          onPressed: () => Navigator.maybePop(context),
                         ),
-                      ),
-                      const SizedBox(height: 20),
-                      const Text('My Profile',
-                          style: TextStyle(
-                              fontSize: 28, fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 2),
-                      Text(
-                        user.role == UserRole.librarian ? 'Librarian' : 'Student',
-                        style: const TextStyle(color: Palette.textMuted),
-                      ),
-                      const SizedBox(height: 16),
-                      _ProfileField(
-                        label: 'First Name',
-                        controller: _first,
-                        editing: _editing,
-                        validator: (v) => Validators.name(v, 'First name'),
-                      ),
-                      const SizedBox(height: 14),
-                      _ProfileField(
-                        label: 'Last Name',
-                        controller: _last,
-                        editing: _editing,
-                        validator: (v) => Validators.name(v, 'Last name'),
-                      ),
-                      const SizedBox(height: 14),
-                      _ProfileField(
-                        label: 'Email',
-                        controller: _email,
-                        editing: _editing,
-                        keyboardType: TextInputType.emailAddress,
-                        validator: Validators.email,
-                      ),
-                      const SizedBox(height: 14),
-                      _ProfileField(
-                        label: 'Phone Number',
-                        controller: _phone,
-                        editing: _editing,
-                        keyboardType: TextInputType.phone,
-                        validator: Validators.phone,
-                      ),
-                      if (_error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Text(_error!,
-                              style: TextStyle(color: Colors.red.shade700)),
-                        ),
-                      const SizedBox(height: 24),
-                      Row(
+                      )
+                    else
+                      const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: _changePhoto,
+                      child: Stack(
                         children: [
-                          Expanded(
-                            child: _editing
-                                ? FilledButton(
-                                    onPressed: _save,
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: Palette.burgundy,
-                                      shape: _btnShape,
-                                      padding: _btnPad,
-                                    ),
-                                    child: const Text('Save Changes'),
-                                  )
-                                : OutlinedButton.icon(
-                                    onPressed: _startEdit,
-                                    icon: const Icon(Icons.edit_square, size: 16),
-                                    label: const Text('Edit Profile'),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: Palette.textDark,
-                                      side: const BorderSide(
-                                          color: Palette.burgundy),
-                                      shape: _btnShape,
-                                      padding: _btnPad,
-                                    ),
-                                  ),
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Palette.cream,
+                            ),
+                            child: CircleAvatar(
+                              radius: 52,
+                              backgroundColor: Palette.creamLight,
+                              backgroundImage: user.avatar != null
+                                  ? MemoryImage(user.avatar!)
+                                  : null,
+                              child: user.avatar == null
+                                  ? Text(
+                                      user.initial,
+                                      style: const TextStyle(
+                                        fontSize: 44,
+                                        color: Palette.burgundy,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    )
+                                  : null,
+                            ),
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: _confirmLogout,
-                              icon: const Icon(Icons.logout, size: 16),
-                              label: const Text('Logout'),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFFE00000),
-                                foregroundColor: Colors.white,
-                                shape: _btnShape,
-                                padding: _btnPad,
-                              ),
+                          const Positioned(
+                            right: 2,
+                            bottom: 2,
+                            child: CircleAvatar(
+                              radius: 17,
+                              backgroundColor: Palette.amber,
+                              child: Icon(Icons.camera_alt,
+                                  size: 17, color: Colors.white),
                             ),
                           ),
                         ],
                       ),
-                      if (_editing)
-                        Center(
-                          child: TextButton(
-                            onPressed: _cancelEdit,
-                            style: TextButton.styleFrom(
-                                foregroundColor: Palette.textMuted),
-                            child: const Text('Cancel'),
-                          ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text('${user.firstName} ${user.lastName}'.trim(),
+                        textAlign: TextAlign.center,
+                        style: text.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: Palette.creamLight,
+                        )),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: const Color(0x26FFFFFF),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        isLibrarian ? 'Librarian' : 'Student',
+                        style: text.labelMedium?.copyWith(
+                          color: Palette.creamLight,
+                          fontWeight: FontWeight.w600,
                         ),
-                    ],
-                  ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+
+              // Stats (only for students)
+              if (!isLibrarian)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                  child: ListenableBuilder(
+                    listenable: BorrowStore.instance,
+                    builder: (context, _) {
+                      final store = BorrowStore.instance;
+                      return Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: Palette.card,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0x2655161D)),
+                        ),
+                        child: Row(
+                          children: [
+                            _StatTile(
+                                value: store.items.length, label: 'Borrowed'),
+                            const _StatDivider(),
+                            _StatTile(
+                              value: store.overdue.length,
+                              label: 'Overdue',
+                              color: store.overdue.isEmpty
+                                  ? null
+                                  : Colors.red.shade700,
+                            ),
+                            const _StatDivider(),
+                            _StatTile(
+                                value: store.history.length,
+                                label: 'Returned'),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+              // Personal information
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Personal information',
+                        style: text.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: Palette.burgundy,
+                        )),
+                    const SizedBox(height: 14),
+                    _ProfileField(
+                      label: 'First name',
+                      icon: Icons.person_outline,
+                      controller: _first,
+                      editing: _editing,
+                      validator: (v) => Validators.name(v, 'First name'),
+                    ),
+                    const SizedBox(height: 14),
+                    _ProfileField(
+                      label: 'Last name',
+                      icon: Icons.badge_outlined,
+                      controller: _last,
+                      editing: _editing,
+                      validator: (v) => Validators.name(v, 'Last name'),
+                    ),
+                    const SizedBox(height: 14),
+                    _ProfileField(
+                      label: 'Email',
+                      icon: Icons.mail_outline,
+                      controller: _email,
+                      editing: _editing,
+                      keyboardType: TextInputType.emailAddress,
+                      validator: Validators.email,
+                    ),
+                    const SizedBox(height: 14),
+                    _ProfileField(
+                      label: 'Phone number',
+                      icon: Icons.phone_outlined,
+                      controller: _phone,
+                      editing: _editing,
+                      keyboardType: TextInputType.phone,
+                      validator: Validators.phone,
+                    ),
+                    if (_error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text(_error!,
+                            style: TextStyle(color: Colors.red.shade700)),
+                      ),
+                    const SizedBox(height: 24),
+
+                    // Primary action
+                    SizedBox(
+                      width: double.infinity,
+                      child: _editing
+                          ? FilledButton.icon(
+                              onPressed: _save,
+                              icon: const Icon(Icons.check, size: 18),
+                              label: const Text('Save changes'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Palette.burgundy,
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
+                            )
+                          : FilledButton.icon(
+                              onPressed: _startEdit,
+                              icon: const Icon(Icons.edit_outlined, size: 18),
+                              label: const Text('Edit profile'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Palette.burgundy,
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                    ),
+                    if (_editing)
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton(
+                          onPressed: _cancelEdit,
+                          style: TextButton.styleFrom(
+                              foregroundColor: Palette.textMuted),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+
+                    // Logout
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _confirmLogout,
+                        icon: const Icon(Icons.logout, size: 18),
+                        label: const Text('Log out'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFE00000),
+                          side: const BorderSide(color: Color(0xFFE00000)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+}
+
+class _StatTile extends StatelessWidget {
+  const _StatTile({required this.value, required this.label, this.color});
+
+  final int value;
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Expanded(
+      child: Column(
+        children: [
+          Text('$value',
+              style: text.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: color ?? Palette.burgundy,
+              )),
+          const SizedBox(height: 2),
+          Text(label,
+              style: text.bodySmall?.copyWith(color: Palette.textMuted)),
+        ],
       ),
     );
   }
 }
 
-final _btnShape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(6));
-const _btnPad = EdgeInsets.symmetric(vertical: 14);
+class _StatDivider extends StatelessWidget {
+  const _StatDivider();
+
+  @override
+  Widget build(BuildContext context) =>
+      Container(width: 1, height: 32, color: const Color(0x2655161D));
+}
 
 class _ProfileField extends StatelessWidget {
   const _ProfileField({
     required this.label,
+    required this.icon,
     required this.controller,
     required this.editing,
     required this.validator,
@@ -384,6 +515,7 @@ class _ProfileField extends StatelessWidget {
   });
 
   final String label;
+  final IconData icon;
   final TextEditingController controller;
   final bool editing;
   final String? Function(String?) validator;
@@ -391,12 +523,16 @@ class _ProfileField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(12);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 4),
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Palette.textMuted)),
+        const SizedBox(height: 6),
         TextFormField(
           controller: controller,
           readOnly: !editing,
@@ -405,22 +541,33 @@ class _ProfileField extends StatelessWidget {
           autovalidateMode: editing
               ? AutovalidateMode.onUserInteraction
               : AutovalidateMode.disabled,
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Palette.textDark),
           decoration: InputDecoration(
-            isDense: true,
             filled: true,
             fillColor: editing ? Colors.white : Palette.card,
+            prefixIcon: Icon(icon, size: 20, color: Palette.burgundy),
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: radius,
               borderSide: BorderSide(
-                color: editing ? Palette.burgundy : Palette.textMuted,
+                color: editing ? Palette.burgundy : const Color(0x2655161D),
               ),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: radius,
               borderSide: const BorderSide(color: Palette.burgundy, width: 2),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: radius,
+              borderSide: BorderSide(color: Colors.red.shade700),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: radius,
+              borderSide: BorderSide(color: Colors.red.shade700, width: 2),
             ),
           ),
         ),
