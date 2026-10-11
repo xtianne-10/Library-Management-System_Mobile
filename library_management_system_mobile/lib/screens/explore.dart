@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/app_nav_bar.dart';
 import 'package:library_management_system_mobile/models/book.dart';
+import 'package:library_management_system_mobile/globes/book_details_sheet.dart';
+import 'package:library_management_system_mobile/globes/borrow_store.dart';
 
 enum _Sort {
   title('Title A–Z'),
@@ -13,8 +15,6 @@ enum _Sort {
   const _Sort(this.label);
   final String label;
 }
-
-String _formatYear(int year) => year < 0 ? '${-year} BCE' : '$year';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
@@ -74,7 +74,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
     final list = _books.where((b) {
       if (_category != 'All' && b.category != _category) return false;
-      if (_availableOnly && !b.available) return false;
+      if (_availableOnly && !BorrowStore.instance.isAvailable(b)) return false;
       if (q.isEmpty) return true;
       return b.title.toLowerCase().contains(q) ||
           b.author.toLowerCase().contains(q) ||
@@ -124,7 +124,12 @@ class _ExploreScreenState extends State<ExploreScreen> {
         body: Column(
           children: [
             _buildHeader(context),
-            Expanded(child: _buildBody(context)),
+            Expanded(
+              child: ListenableBuilder(
+                listenable: BorrowStore.instance,
+                builder: (context, _) => _buildBody(context),
+              ),
+            ),
           ],
         ),
         bottomNavigationBar: const AppNavBar(currentIndex: 1),
@@ -311,108 +316,11 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   itemCount: results.length,
                   itemBuilder: (context, i) => _BookCard(
                     book: results[i],
-                    onTap: () => _showDetails(results[i]),
+                    onTap: () => showBookDetails(context, results[i]),
                   ),
                 ),
         ),
       ],
-    );
-  }
-
-  // Book details sheet
-
-  void _showDetails(Book book) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Palette.page,
-      isScrollControlled: true,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) {
-        final text = Theme.of(sheetContext).textTheme;
-        final meta = [
-          book.category,
-          if (book.year != null) _formatYear(book.year!),
-          if (book.pages != null) '${book.pages} pages',
-        ].join('  •  ');
-
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: 90,
-                      height: 130,
-                      child: _Cover(book: book),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(book.title,
-                              style: text.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                color: Palette.burgundy,
-                              )),
-                          const SizedBox(height: 2),
-                          Text(book.author,
-                              style: text.bodyMedium
-                                  ?.copyWith(color: Palette.textMuted)),
-                          const SizedBox(height: 8),
-                          Text(meta,
-                              style: text.bodySmall
-                                  ?.copyWith(color: Palette.textDark)),
-                          const SizedBox(height: 8),
-                          _AvailabilityLabel(book: book, showCopies: true),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                if (book.description.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(book.description,
-                      style: text.bodyMedium?.copyWith(
-                        color: Palette.textDark,
-                        height: 1.4,
-                      )),
-                ],
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Palette.burgundy,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: () {
-                      Navigator.pop(sheetContext);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(book.available
-                              ? 'Reserved "${book.title}".'
-                              : 'You\'re on the waitlist for "${book.title}".'),
-                        ),
-                      );
-                    },
-                    child: Text(
-                        book.available ? 'Reserve' : 'Join waitlist'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }
@@ -465,9 +373,11 @@ class _AvailabilityLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final label = book.available
+    final store = BorrowStore.instance;
+    final isAvail = store.isAvailable(book);
+    final label = isAvail
         ? (showCopies
-            ? '${book.copiesAvailable} of ${book.totalCopies} available'
+            ? '${store.copiesLeft(book)} of ${book.totalCopies} available'
             : 'Available')
         : 'On hold';
 
@@ -475,9 +385,9 @@ class _AvailabilityLabel extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(
-          book.available ? Icons.check_circle : Icons.schedule,
+          isAvail ? Icons.check_circle : Icons.schedule,
           size: 16,
-          color: book.available ? Palette.slytherin : Palette.amber,
+          color: isAvail ? Palette.slytherin : Palette.amber,
         ),
         const SizedBox(width: 4),
         Text(label,

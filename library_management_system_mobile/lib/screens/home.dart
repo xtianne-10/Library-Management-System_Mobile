@@ -6,6 +6,8 @@ import 'package:library_management_system_mobile/app_nav_bar.dart';
 import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
+import 'package:library_management_system_mobile/globes/borrow_store.dart';
+import 'package:library_management_system_mobile/globes/book_details_sheet.dart';
 
 // Home
 
@@ -149,17 +151,24 @@ class _HomeScreenState extends State<HomeScreen> {
             // Due soon
             const _SectionTitle('Due soon'),
             const SizedBox(height: 12),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20),
-              child: _DueSoonCard(
-                book: Book(
-                  title: 'The Great Gatsby',
-                  author: 'F. Scott Fitzgerald',
-                  category: 'Fiction',
-                  color: Palette.ravenclaw,
-                ),
-                daysLeft: 3,
-              ),
+            ListenableBuilder(
+              listenable: BorrowStore.instance,
+              builder: (context, _) {
+                final loans = BorrowStore.instance.items;
+                if (loans.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20),
+                    child: Text('No borrowed books yet. Tap a book to borrow it.'),
+                  );
+                }
+                // Show the loan that's due the soonest.
+                final next =
+                    loans.reduce((a, b) => a.dueOn.isBefore(b.dueOn) ? a : b);
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _DueSoonCard(book: next.book, daysLeft: next.daysLeft),
+                );
+              },
             ),
             const SizedBox(height: 28),
 
@@ -343,7 +352,7 @@ class _BookTile extends StatelessWidget {
     return SizedBox(
       width: 120,
       child: InkWell(
-        onTap: () {},
+        onTap: () => showBookDetails(context, book),
         borderRadius: BorderRadius.circular(8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -377,71 +386,72 @@ class _BookRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
 
-    return Card(
-      elevation: 0,
-      margin: EdgeInsets.zero,
-      color: Palette.card,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Color(0x2655161D)),
-      ),
-      child: InkWell(
-        onTap: () {},
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              _BookCover(book: book, width: 56, height: 80),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(book.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: text.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: Palette.textDark,
-                        )),
-                    const SizedBox(height: 2),
-                    Text(book.author,
-                        style: text.bodyMedium
-                            ?.copyWith(color: Palette.textMuted)),
-                    const SizedBox(height: 8),
-                    Row(
+    return ListenableBuilder(
+      listenable: BorrowStore.instance,
+      builder: (context, _) {
+        final isAvail = BorrowStore.instance.isAvailable(book);
+        return Card(
+          elevation: 0,
+          margin: EdgeInsets.zero,
+          color: Palette.card,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Color(0x2655161D)),
+          ),
+          child: InkWell(
+            onTap: () => showBookDetails(context, book),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  _BookCover(book: book, width: 56, height: 80),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          book.available
-                              ? Icons.check_circle
-                              : Icons.schedule,
-                          size: 16,
-                          color: book.available
-                              ? Palette.slytherin
-                              : Palette.amber,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          book.available ? 'Available' : 'On hold',
-                          style: text.bodySmall
-                              ?.copyWith(color: Palette.textDark),
+                        Text(book.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: text.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: Palette.textDark,
+                            )),
+                        const SizedBox(height: 2),
+                        Text(book.author,
+                            style: text.bodyMedium
+                                ?.copyWith(color: Palette.textMuted)),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Icon(
+                              isAvail ? Icons.check_circle : Icons.schedule,
+                              size: 16,
+                              color: isAvail ? Palette.slytherin : Palette.amber,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              isAvail ? 'Available' : 'On hold',
+                              style: text.bodySmall?.copyWith(color: Palette.textDark),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                  IconButton(
+                    onPressed: () {},
+                    tooltip: 'Save for later',
+                    color: Palette.burgundy,
+                    icon: const Icon(Icons.bookmark_add_outlined),
+                  ),
+                ],
               ),
-              IconButton(
-                onPressed: () {},
-                tooltip: 'Save for later',
-                color: Palette.burgundy,
-                icon: const Icon(Icons.bookmark_add_outlined),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -481,7 +491,7 @@ class _DueSoonCard extends StatelessWidget {
                     style: text.bodyMedium
                         ?.copyWith(color: Palette.creamMuted)),
                 const SizedBox(height: 8),
-                Text('Due in $daysLeft days',
+                Text(daysLeft < 0 ? '${-daysLeft} days overdue' : 'Due in $daysLeft days',
                     style: text.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                       color: Palette.cream,
