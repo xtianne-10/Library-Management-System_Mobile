@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/app_nav_bar.dart';
 import 'package:library_management_system_mobile/models/book.dart';
-import 'package:library_management_system_mobile/globes/book_details_sheet.dart';
+import 'package:library_management_system_mobile/screens/book_details.dart';
 import 'package:library_management_system_mobile/globes/borrow_store.dart';
 
 enum _Sort {
@@ -316,7 +316,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   itemCount: results.length,
                   itemBuilder: (context, i) => _BookCard(
                     book: results[i],
-                    onTap: () => showBookDetails(context, results[i]),
+                    onTap: () => openBookDetails(context, results[i]),
                   ),
                 ),
         ),

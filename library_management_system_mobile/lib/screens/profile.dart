@@ -7,6 +7,8 @@ import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/utils/validators.dart';
 import 'package:library_management_system_mobile/globes/borrow_store.dart';
+import 'package:library_management_system_mobile/globes/favorites_store.dart';
+import 'package:library_management_system_mobile/screens/favorites.dart';
 
 
 class ProfileScreen extends StatefulWidget {
@@ -339,6 +341,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 value: store.history.length,
                                 label: 'Returned'),
                           ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+              // Favorites shortcut
+              if (!isLibrarian)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                  child: ListenableBuilder(
+                    listenable: FavoritesStore.instance,
+                    builder: (context, _) {
+                      final count = FavoritesStore.instance.items.length;
+                      return Material(
+                        color: Palette.card,
+                        borderRadius: BorderRadius.circular(16),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const FavoritesScreen()),
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 14),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(16),
+                              border:
+                                  Border.all(color: const Color(0x2655161D)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.favorite,
+                                    color: Palette.burgundy),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text('My favorites',
+                                      style: text.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: Palette.textDark,
+                                      )),
+                                ),
+                                Text('$count',
+                                    style: text.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      color: Palette.burgundy,
+                                    )),
+                                const SizedBox(width: 4),
+                                const Icon(Icons.chevron_right,
+                                    color: Palette.textMuted),
+                              ],
+                            ),
+                          ),
                         ),
                       );
                     },

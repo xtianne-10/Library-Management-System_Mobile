@@ -7,11 +7,9 @@ import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/globes/borrow_store.dart';
-import 'package:library_management_system_mobile/globes/book_details_sheet.dart';
+import 'package:library_management_system_mobile/screens/book_details.dart';
 
-// Home
 
-// Greeting based on the time of day.
 String _greeting() {
   final h = DateTime.now().hour;
   if (h < 12) return 'Good morning';
@@ -352,7 +350,7 @@ class _BookTile extends StatelessWidget {
     return SizedBox(
       width: 120,
       child: InkWell(
-        onTap: () => showBookDetails(context, book),
+        onTap: () => openBookDetails(context, book),
         borderRadius: BorderRadius.circular(8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -399,7 +397,7 @@ class _BookRow extends StatelessWidget {
             side: const BorderSide(color: Color(0x2655161D)),
           ),
           child: InkWell(
-            onTap: () => showBookDetails(context, book),
+            onTap: () => openBookDetails(context, book),
             borderRadius: BorderRadius.circular(12),
             child: Padding(
               padding: const EdgeInsets.all(12),
