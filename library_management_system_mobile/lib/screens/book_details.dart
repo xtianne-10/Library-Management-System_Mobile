@@ -37,22 +37,22 @@ class BookDetailsScreen extends StatelessWidget {
       ));
   }
 
-  void _onBorrowPressed(BuildContext context, {required bool canBorrow}) {
+  void _onBorrowPressed(BuildContext context, {required bool isAvail}) {
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
 
-    if (canBorrow) {
-      final ok = BorrowStore.instance.borrow(book);
-      messenger.showSnackBar(SnackBar(
-        content: Text(ok
-            ? 'Borrowed "${book.title}". Due in ${BorrowStore.loanDays} days.'
-            : 'Can\'t borrow "${book.title}": limit reached or overdue books.'),
-      ));
-    } else {
+    if (!isAvail) {
       messenger.showSnackBar(SnackBar(
         content: Text('You\'re on the waitlist for "${book.title}".'),
       ));
+      return;
     }
+
+    final error = BorrowStore.instance.requestBorrow(book);
+    messenger.showSnackBar(SnackBar(
+      content: Text(error ??
+          'Request sent for "${book.title}". Waiting for librarian approval.'),
+    ));
   }
 
   @override
@@ -74,10 +74,38 @@ class BookDetailsScreen extends StatelessWidget {
         ]),
         builder: (context, _) {
           final isFav = FavoritesStore.instance.isFavorite(book);
-          final borrowed = BorrowStore.instance.isBorrowed(book);
-          final left = BorrowStore.instance.copiesLeft(book);
+          final store = BorrowStore.instance;
+          final left = store.copiesLeft(book);
           final isAvail = left > 0;
-          final canBorrow = isAvail && !borrowed;
+          final loan = store.loanOf(book);
+          final pending = store.isPending(book);
+          final declined = store.isDeclined(book);
+
+          // Button text and action for the current state
+          String buttonLabel;
+          VoidCallback? buttonAction;
+
+          if (loan != null) {
+            final d = loan.daysLeft;
+            buttonLabel = loan.isOverdue
+                ? 'Borrowed - Overdue by ${loan.daysOverdue} ${loan.daysOverdue == 1 ? 'day' : 'days'}'
+                : d == 0
+                    ? 'Borrowed - Due today'
+                    : 'Borrowed - Due in $d ${d == 1 ? 'day' : 'days'}';
+            buttonAction = null;
+          } else if (pending) {
+            buttonLabel = 'Waiting for approval';
+            buttonAction = null;
+          } else if (declined) {
+            buttonLabel = 'Request declined - Try again';
+            buttonAction = () => _onBorrowPressed(context, isAvail: isAvail);
+          } else if (isAvail) {
+            buttonLabel = 'Request to borrow';
+            buttonAction = () => _onBorrowPressed(context, isAvail: isAvail);
+          } else {
+            buttonLabel = 'Join waitlist';
+            buttonAction = () => _onBorrowPressed(context, isAvail: isAvail);
+          }
 
           return Scaffold(
             backgroundColor: Palette.page,
@@ -91,35 +119,25 @@ class BookDetailsScreen extends StatelessWidget {
               child: SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-                  child: Row(
-                    children: [
-                      // Borrow button
-                      Expanded(
-                        child: SizedBox(
-                          height: 56,
-                          child: FilledButton.icon(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: Palette.burgundy,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              textStyle: const TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.w700),
-                            ),
-                            label: Text(borrowed
-                                ? 'Already borrowed'
-                                : isAvail
-                                    ? 'Borrow'
-                                    : 'Join waitlist'),
-                            onPressed: borrowed
-                                ? null
-                                : () => _onBorrowPressed(context,
-                                    canBorrow: canBorrow),
-                          ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Palette.burgundy,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor:
+                            Palette.burgundy.withValues(alpha: 0.5),
+                        disabledForegroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
                         ),
+                        textStyle: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700),
                       ),
-                    ],
+                      onPressed: buttonAction,
+                      child: Text(buttonLabel),
+                    ),
                   ),
                 ),
               ),
@@ -128,7 +146,6 @@ class BookDetailsScreen extends StatelessWidget {
             body: ListView(
               padding: EdgeInsets.zero,
               children: [
-
                 // Hero header
                 Container(
                   clipBehavior: Clip.antiAlias,
@@ -138,85 +155,76 @@ class BookDetailsScreen extends StatelessWidget {
                       end: Alignment.bottomRight,
                       colors: [book.color, darker],
                     ),
-                    
                   ),
-                  child: Stack(
-                    children: [
-                      
-                      Padding(
-                        padding:
-                            EdgeInsets.fromLTRB(20, topInset + 8, 20, 28),
-                        child: Column(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(20, topInset + 8, 20, 28),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
-                              children: [
-                                _RoundIconButton(
-                                  icon: Icons.arrow_back,
-                                  tooltip: 'Back',
-                                  onPressed: () => Navigator.pop(context),
-                                ),
-                                _RoundIconButton(
-                                  icon: isFav
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                  tooltip: isFav
-                                      ? 'Remove from favorites'
-                                      : 'Add to favorites',
-                                  iconColor:
-                                      isFav ? Palette.amber : Colors.white,
-                                  onPressed: () => _toggleFavorite(context),
-                                ),
-                              ],
+                            _RoundIconButton(
+                              icon: Icons.arrow_back,
+                              tooltip: 'Back',
+                              onPressed: () => Navigator.pop(context),
                             ),
-                            const SizedBox(height: 12),
-                            _Cover(book: book),
-                            const SizedBox(height: 22),
-                            Text(
-                              book.title,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontFamily: 'Georgia',
-                                fontFamilyFallback: ['serif'],
-                                fontWeight: FontWeight.w700,
-                                fontSize: 24,
-                                height: 1.2,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'by ${book.author}',
-                              textAlign: TextAlign.center,
-                              style: text.titleMedium
-                                  ?.copyWith(color: Colors.white70),
-                            ),
-                            const SizedBox(height: 14),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.18),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                book.category,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 0.4,
-                                ),
-                              ),
+                            _RoundIconButton(
+                              icon: isFav
+                                  ? Icons.favorite
+                                  : Icons.favorite_border,
+                              tooltip: isFav
+                                  ? 'Remove from favorites'
+                                  : 'Add to favorites',
+                              iconColor: isFav ? Palette.amber : Colors.white,
+                              onPressed: () => _toggleFavorite(context),
                             ),
                           ],
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                        _Cover(book: book),
+                        const SizedBox(height: 22),
+                        Text(
+                          book.title,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontFamily: 'Georgia',
+                            fontFamilyFallback: ['serif'],
+                            fontWeight: FontWeight.w700,
+                            fontSize: 24,
+                            height: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'by ${book.author}',
+                          textAlign: TextAlign.center,
+                          style: text.titleMedium
+                              ?.copyWith(color: Colors.white70),
+                        ),
+                        const SizedBox(height: 14),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            book.category,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
 
-                // Body 
+                // Body
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
                   child: Column(
@@ -228,8 +236,7 @@ class BookDetailsScreen extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: Palette.card,
                           borderRadius: BorderRadius.circular(16),
-                          border:
-                              Border.all(color: const Color(0x2655161D)),
+                          border: Border.all(color: const Color(0x2655161D)),
                         ),
                         child: IntrinsicHeight(
                           child: Row(

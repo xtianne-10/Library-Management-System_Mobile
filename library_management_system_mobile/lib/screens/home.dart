@@ -55,7 +55,9 @@ class _HomeScreenState extends State<HomeScreen> {
         .toList();
   }
 
-  void _goMyBooks() => Navigator.pushReplacementNamed(context, '/mybooks');
+  // Pass tab: 'pending' to open My Books on the Pending tab
+  void _goMyBooks({String? tab}) =>
+      Navigator.pushReplacementNamed(context, '/mybooks', arguments: tab);
   void _goExplore() => Navigator.pushReplacementNamed(context, '/explore');
 
   @override
@@ -134,18 +136,31 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Borrowing summary
+            // Borrowing summary + pending shortcut
             ListenableBuilder(
               listenable: BorrowStore.instance,
               builder: (context, _) {
                 final store = BorrowStore.instance;
+                final pending = store.myPendingRequests.length;
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: _SummaryCard(
-                    borrowed: store.items.length,
-                    overdue: store.overdue.length,
-                    returned: store.history.length,
-                    onTap: _goMyBooks,
+                  child: Column(
+                    children: [
+                      _SummaryCard(
+                        borrowed: store.items.length,
+                        pending: pending,
+                        overdue: store.overdue.length,
+                        returned: store.history.length,
+                        onTap: () => _goMyBooks(),
+                      ),
+                      if (pending > 0) ...[
+                        const SizedBox(height: 12),
+                        _PendingBanner(
+                          count: pending,
+                          onTap: () => _goMyBooks(tab: 'pending'),
+                        ),
+                      ],
+                    ],
                   ),
                 );
               },
@@ -153,7 +168,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 28),
 
             // Due soon (nearest one + a link)
-            _SectionTitle('Due soon', onSeeAll: _goMyBooks),
+            _SectionTitle('Due soon', onSeeAll: () => _goMyBooks()),
             const SizedBox(height: 12),
             ListenableBuilder(
               listenable: BorrowStore.instance,
@@ -177,7 +192,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       _DueSoonCard(book: next.book, daysLeft: next.daysLeft),
                       if (more > 0)
                         TextButton(
-                          onPressed: _goMyBooks,
+                          onPressed: () => _goMyBooks(),
                           child: Text('+ $more more on loan'),
                         ),
                     ],
@@ -250,12 +265,14 @@ class _SectionTitle extends StatelessWidget {
 class _SummaryCard extends StatelessWidget {
   const _SummaryCard({
     required this.borrowed,
+    required this.pending,
     required this.overdue,
     required this.returned,
     required this.onTap,
   });
 
   final int borrowed;
+  final int pending;
   final int overdue;
   final int returned;
   final VoidCallback onTap;
@@ -295,6 +312,8 @@ class _SummaryCard extends StatelessWidget {
           child: Row(
             children: [
               _stat(context, borrowed, 'Borrowed'),
+              _stat(context, pending, 'Pending',
+                  color: pending == 0 ? null : Palette.amber),
               _stat(context, overdue, 'Overdue',
                   color: overdue == 0 ? null : Colors.red.shade700),
               _stat(context, returned, 'Returned'),
@@ -302,6 +321,54 @@ class _SummaryCard extends StatelessWidget {
                 padding: EdgeInsets.only(right: 8),
                 child: Icon(Icons.chevron_right, color: Palette.textMuted),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Pending requests shortcut
+
+class _PendingBanner extends StatelessWidget {
+  const _PendingBanner({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+
+    return Material(
+      color: Palette.amber.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  count == 1
+                      ? '1 request waiting for approval'
+                      : '$count requests waiting for approval',
+                  style: text.bodyMedium?.copyWith(
+                    color: Palette.textDark,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text('View',
+                  style: text.bodyMedium?.copyWith(
+                    color: Palette.burgundy,
+                    fontWeight: FontWeight.w700,
+                  )),
+              const Icon(Icons.chevron_right, color: Palette.burgundy),
             ],
           ),
         ),

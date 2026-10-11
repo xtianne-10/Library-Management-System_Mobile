@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:library_management_system_mobile/app_nav_bar.dart';
-import 'package:library_management_system_mobile/globes/book_details_sheet.dart';
 import 'package:library_management_system_mobile/globes/borrow_store.dart';
 import 'package:library_management_system_mobile/models/book.dart';
+import 'package:library_management_system_mobile/screens/book_details.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 
 enum _Filter {
   current('Current'),
+  pending('Pending'),
   overdue('Overdue'),
   history('History');
 
@@ -31,6 +32,16 @@ class MyBooksScreen extends StatefulWidget {
 
 class _MyBooksScreenState extends State<MyBooksScreen> {
   _Filter _filter = _Filter.current;
+  bool _argsRead = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_argsRead) return;
+    _argsRead = true;
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args == 'pending') _filter = _Filter.pending;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,14 +56,59 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
           listenable: BorrowStore.instance,
           builder: (context, _) {
             final store = BorrowStore.instance;
-            final lists = {
-              _Filter.current: store.current,
-              _Filter.overdue: store.overdue,
-              _Filter.history: store.history,
+            final pendingReqs = store.myPendingRequests;
+            final counts = {
+              _Filter.current: store.current.length,
+              _Filter.pending: pendingReqs.length,
+              _Filter.overdue: store.overdue.length,
+              _Filter.history: store.history.length,
             };
-            final loans = lists[_filter]!;
             final activeCount = store.items.length;
             final overdueCount = store.overdue.length;
+            final pendingCount = pendingReqs.length;
+
+            final summaryParts = <String>[
+              if (activeCount > 0) '$activeCount borrowed',
+              if (overdueCount > 0) '$overdueCount overdue',
+              if (pendingCount > 0) '$pendingCount pending',
+            ];
+            final summary = summaryParts.isEmpty
+                ? 'Nothing borrowed right now.'
+                : summaryParts.join('  •  ');
+
+            // Body for the selected tab
+            Widget list;
+            if (_filter == _Filter.pending) {
+              list = pendingReqs.isEmpty
+                  ? _EmptyState(filter: _filter)
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                      itemCount: pendingReqs.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 14),
+                      itemBuilder: (context, i) => _RequestCard(
+                        key: ValueKey(pendingReqs[i].id),
+                        request: pendingReqs[i],
+                      ),
+                    );
+            } else {
+              final loans = switch (_filter) {
+                _Filter.current => store.current,
+                _Filter.overdue => store.overdue,
+                _Filter.history => store.history,
+                _Filter.pending => const <BorrowedBook>[],
+              };
+              list = loans.isEmpty
+                  ? _EmptyState(filter: _filter)
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                      itemCount: loans.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 14),
+                      itemBuilder: (context, i) => _LoanCard(
+                        key: ValueKey(loans[i].txId),
+                        loan: loans[i],
+                      ),
+                    );
+            }
 
             return Column(
               children: [
@@ -77,11 +133,7 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
                           )),
                       const SizedBox(height: 2),
                       Text(
-                        overdueCount > 0
-                            ? '$activeCount borrowed  •  $overdueCount overdue'
-                            : activeCount == 0
-                                ? 'Nothing borrowed right now.'
-                                : '$activeCount borrowed',
+                        summary,
                         style: text.bodyMedium
                             ?.copyWith(color: Palette.creamMuted),
                       ),
@@ -98,10 +150,10 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
                               Expanded(
                                 child: _SegmentButton(
                                   label: f.label,
-                                  count: lists[f]!.length,
+                                  count: counts[f]!,
                                   selected: f == _filter,
                                   alert: f == _Filter.overdue &&
-                                      lists[f]!.isNotEmpty,
+                                      counts[f]! > 0,
                                   onTap: () => setState(() => _filter = f),
                                 ),
                               ),
@@ -113,20 +165,7 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
                 ),
 
                 // List
-                Expanded(
-                  child: loans.isEmpty
-                      ? _EmptyState(filter: _filter)
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                          itemCount: loans.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 14),
-                          itemBuilder: (context, i) => _LoanCard(
-                            key: ValueKey(loans[i].txId),
-                            loan: loans[i],
-                          ),
-                        ),
-                ),
+                Expanded(child: list),
               ],
             );
           },
@@ -159,42 +198,47 @@ class _SegmentButton extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
         decoration: BoxDecoration(
           color: selected ? Palette.cream : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: selected ? Palette.burgundy : Palette.creamLight,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-              decoration: BoxDecoration(
-                color: alert
-                    ? Colors.red.shade700
-                    : selected
-                        ? Palette.burgundy
-                        : const Color(0x33FFFFFF),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                '$count',
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
+
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: selected ? Palette.burgundy : Palette.creamLight,
                 ),
               ),
-            ),
-          ],
+              const SizedBox(width: 5),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                decoration: BoxDecoration(
+                  color: alert
+                      ? Colors.red.shade700
+                      : selected
+                          ? Palette.burgundy
+                          : const Color(0x33FFFFFF),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$count',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -209,6 +253,7 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final (icon, message) = switch (filter) {
       _Filter.current => (Icons.auto_stories_outlined, 'No current loans.'),
+      _Filter.pending => (Icons.hourglass_empty, 'No pending requests.'),
       _Filter.overdue => (Icons.task_alt, 'No overdue books.'),
       _Filter.history => (Icons.history, 'No returned books yet.'),
     };
@@ -228,6 +273,137 @@ class _EmptyState extends StatelessWidget {
     );
   }
 }
+
+// Pending request card
+
+class _RequestCard extends StatelessWidget {
+  const _RequestCard({super.key, required this.request});
+  final BorrowRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final book = request.book;
+    final text = Theme.of(context).textTheme;
+    const statusColor = Palette.amber;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Palette.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x2655161D)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _MiniCover(book: book),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: statusColor.withAlpha(31),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text('PENDING',
+                            style: text.labelSmall?.copyWith(
+                              color: statusColor,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            )),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(book.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: Palette.textDark,
+                          )),
+                      const SizedBox(height: 2),
+                      Text(book.author,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.bodyMedium
+                              ?.copyWith(color: Palette.textMuted)),
+                      const SizedBox(height: 10),
+                      Text('Requested ${_fmt(request.requestedOn)}',
+                          style: text.bodySmall?.copyWith(
+                            color: Palette.textDark,
+                            fontWeight: FontWeight.w600,
+                          )),
+                      const SizedBox(height: 2),
+                      Text('Waiting for librarian approval',
+                          style: text.bodySmall
+                              ?.copyWith(color: Palette.textMuted)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => openBookDetails(context, book),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Palette.burgundy,
+                      side: const BorderSide(color: Palette.burgundy),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('View Details'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () {
+                      BorrowStore.instance.cancelRequest(request);
+                      ScaffoldMessenger.of(context)
+                        ..hideCurrentSnackBar()
+                        ..showSnackBar(SnackBar(
+                          content:
+                              Text('Request cancelled for "${book.title}".'),
+                        ));
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.red.shade700,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Cancel request'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Loan card
 
 class _LoanCard extends StatefulWidget {
   const _LoanCard({super.key, required this.loan});
@@ -310,12 +486,11 @@ class _LoanCardState extends State<_LoanCard> {
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Text(statusLabel,
-                                  style: text.labelSmall?.copyWith(
-                                    color: statusColor,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.5,
-                                  )
-                                ),
+                                    style: text.labelSmall?.copyWith(
+                                      color: statusColor,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.5,
+                                    )),
                               ),
                               const Spacer(),
                               AnimatedRotation(
@@ -359,8 +534,7 @@ class _LoanCardState extends State<_LoanCard> {
                           ],
                           Text(summary,
                               style: text.bodySmall?.copyWith(
-                                color:
-                                    loan.isOverdue ? red : Palette.textDark,
+                                color: loan.isOverdue ? red : Palette.textDark,
                                 fontWeight: FontWeight.w600,
                               )),
                         ],
@@ -379,8 +553,7 @@ class _LoanCardState extends State<_LoanCard> {
                       : Column(
                           children: [
                             const SizedBox(height: 14),
-                            const Divider(
-                                height: 1, color: Color(0x2655161D)),
+                            const Divider(height: 1, color: Color(0x2655161D)),
                             const SizedBox(height: 12),
                             _InfoRow(
                               icon: Icons.event_available_outlined,
@@ -407,7 +580,7 @@ class _LoanCardState extends State<_LoanCard> {
                                 Expanded(
                                   child: OutlinedButton(
                                     onPressed: () =>
-                                        showBookDetails(context, loan.book),
+                                        openBookDetails(context, loan.book),
                                     style: OutlinedButton.styleFrom(
                                       foregroundColor: Palette.burgundy,
                                       side: const BorderSide(
