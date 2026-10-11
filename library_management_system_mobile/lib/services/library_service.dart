@@ -107,6 +107,16 @@ class LibraryService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Adds many books at once. Returns how many were added.
+  int addAll(List<Book> list) {
+    var nextId = _books.fold<int>(0, (m, x) => x.id > m ? x.id : m) + 1;
+    for (final b in list) {
+      _books.add(b.copyWith(id: nextId++));
+    }
+    if (list.isNotEmpty) notifyListeners();
+    return list.length;
+  }
+
   void update(Book b) {
     final i = _books.indexWhere((x) => x.id == b.id);
     if (i == -1) return;

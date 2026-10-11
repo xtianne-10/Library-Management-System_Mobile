@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:convert';
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:typed_data';
+import 'package:library_management_system_mobile/utils/csv_download.dart';
 
 import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/services/auth_service.dart';
@@ -21,6 +25,86 @@ const _months = [
 String _fmt(DateTime? d) =>
     d == null ? '-' : '${_months[d.month - 1]} ${d.day}, ${d.year}';
 
+String _greeting() {
+  final h = DateTime.now().hour;
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+const _cardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(12)),
+  side: BorderSide(color: Color(0x2655161D)),
+);
+
+class _Section extends StatelessWidget {
+  const _Section(this.title, this.icon);
+  final String title;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          Icon(icon, color: Palette.amber, size: 22),
+          const SizedBox(width: 8),
+          Text(title,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontFamily: 'Georgia',
+                    color: Palette.burgundy,
+                  )),
+          const SizedBox(width: 12),
+          Expanded(
+              child: Divider(color: Palette.amber.withAlpha(120), thickness: 1)),
+        ],
+      );
+}
+
+class _LibNavBar extends StatelessWidget {
+  const _LibNavBar({
+    required this.index,
+    required this.onChanged,
+    this.overdue = 0,
+  });
+  final int index;
+  final ValueChanged<int> onChanged;
+  final int overdue;
+
+  @override
+  Widget build(BuildContext context) {
+    return NavigationBar(
+      selectedIndex: index,
+      onDestinationSelected: onChanged,
+      destinations: [
+        const NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
+            label: 'Overview'),
+        const NavigationDestination(
+            icon: Icon(Icons.menu_book_outlined),
+            selectedIcon: Icon(Icons.menu_book),
+            label: 'Books'),
+        const NavigationDestination(
+            icon: Icon(Icons.school_outlined),
+            selectedIcon: Icon(Icons.school),
+            label: 'Students'),
+        NavigationDestination(
+            icon: Badge(
+              isLabelVisible: overdue > 0,
+              label: Text('$overdue'),
+              child: const Icon(Icons.history_edu_outlined),
+            ),
+            selectedIcon: Badge(
+              isLabelVisible: overdue > 0,
+              label: Text('$overdue'),
+              child: const Icon(Icons.history_edu),
+            ),
+            label: 'Loans'),
+      ],
+    );
+  }
+}
+
 class LibrarianScreen extends StatefulWidget {
   const LibrarianScreen({super.key});
 
@@ -30,6 +114,7 @@ class LibrarianScreen extends StatefulWidget {
 
 class _LibrarianScreenState extends State<LibrarianScreen> {
   final _lib = LibraryService.instance;
+  int _tab = 0;
   String _query = '';
   String _sortKey = 'title';
   bool _asc = true;
@@ -195,6 +280,93 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     }
   }
 
+  Future<void> _openImport() async {
+    final msg = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Palette.page,
+      clipBehavior: Clip.antiAlias,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => const _ImportSheet(),
+    );
+    if (msg != null && mounted) {
+      setState(() => _catalogPage = 0);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  Widget _header() {
+    final user = AuthService.instance.currentUser;
+    final name = (user?.firstName.trim().isNotEmpty ?? false)
+        ? user!.firstName.trim()
+        : 'Librarian';
+    final text = Theme.of(context).textTheme;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(
+            20, MediaQuery.of(context).padding.top + 16, 20, 20),
+        decoration: const BoxDecoration(
+          color: Palette.burgundy,
+          borderRadius: BorderRadius.only(
+            bottomLeft: Radius.circular(28),
+            bottomRight: Radius.circular(28),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${_greeting()}, $name',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: Palette.creamLight)),
+                  const SizedBox(height: 2),
+                  Text('Keeper of the Hogwarts Library',
+                      style: text.bodyMedium
+                          ?.copyWith(color: Palette.creamMuted)),
+                ],
+              ),
+            ),
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'profile') {
+                  Navigator.pushNamed(context, '/profile');
+                } else {
+                  _confirmLogout();
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'profile', child: Text('My Profile')),
+                PopupMenuItem(value: 'logout', child: Text('Logout')),
+              ],
+              child: CircleAvatar(
+                radius: 22,
+                backgroundColor: Palette.cream,
+                backgroundImage:
+                    user?.avatar != null ? MemoryImage(user!.avatar!) : null,
+                child: user?.avatar == null
+                    ? Text(user?.initial ?? '?',
+                        style: const TextStyle(
+                            color: Palette.burgundy,
+                            fontWeight: FontWeight.w700))
+                    : null,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _returnTx(BookTransaction t) {
     final fine = t.fine;
     final err = _lib.returnBook(t.id);
@@ -252,28 +424,18 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     final text = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Palette.burgundy,
-        foregroundColor: Palette.creamLight,
-        title: const Text('Hogwarts Library'),
-        actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.account_circle),
-            onSelected: (v) {
-              if (v == 'profile') {
-                Navigator.pushNamed(context, '/profile');
-              } else {
-                _confirmLogout();
-              }
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'profile', child: Text('My Profile')),
-              PopupMenuItem(value: 'logout', child: Text('Logout')),
-            ],
-          ),
-        ],
+      backgroundColor: Palette.page,
+      appBar: PreferredSize(
+        preferredSize:
+            Size.fromHeight(112 + MediaQuery.of(context).padding.top),
+        child: _header(),
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      bottomNavigationBar: _LibNavBar(
+        index: _tab,
+        onChanged: (i) => setState(() => _tab = i),
+        overdue: _lib.transactions.where((t) => t.overdue).length,
+      ),
+      floatingActionButton: _tab != 1 ? null : FloatingActionButton.extended(
         onPressed: () => _openForm(),
         backgroundColor: Palette.amber,
         foregroundColor: Colors.white,
@@ -281,10 +443,11 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         label: const Text('Add Book'),
       ),
       body: ListView(
+        key: ValueKey(_tab),
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 96),
         children: [
-          Text('Librarian Dashboard',
-              style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+          if (_tab == 0) ...[
+          const _Section('Overview', Icons.auto_stories),
           const SizedBox(height: 16),
           GridView.count(
             crossAxisCount: 2,
@@ -298,7 +461,10 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(
-                      color: s.$3, borderRadius: BorderRadius.circular(12)),
+                    color: s.$3,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Palette.burgundy.withAlpha(50)),
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -308,7 +474,10 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                               fontSize: 13, fontWeight: FontWeight.w600)),
                       Text('${s.$2}',
                           style: const TextStyle(
-                              fontSize: 28, fontWeight: FontWeight.w700)),
+                              fontSize: 28,
+                              fontFamily: 'Georgia',
+                              color: Palette.burgundy,
+                              fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ),
@@ -324,15 +493,34 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               label: const Text('Issue Book to Student'),
               style: FilledButton.styleFrom(
                 backgroundColor: Palette.burgundy,
-                foregroundColor: Colors.white,
+                foregroundColor: Palette.creamLight,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: const BorderSide(color: Palette.amber, width: 1.5),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
+          ],
+          if (_tab == 1) ...[
           // ---- Catalog ----
-          Text('Book Catalog',
-              style: text.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const _Section('Book Catalog', Icons.menu_book),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _openImport,
+              icon: const Icon(Icons.upload_file),
+              label: const Text('Bulk Import (CSV)'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Palette.burgundy,
+                side: const BorderSide(color: Palette.burgundy),
+              ),
+            ),
+          ),
           const SizedBox(height: 10),
           TextField(
             onChanged: (v) => setState(() {
@@ -410,9 +598,10 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
             ],
           const SizedBox(height: 28),
 
+          ],
+          if (_tab == 2) ...[
           // ---- Student lookup ----
-          Text('Student Lookup',
-              style: text.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const _Section('Student Lookup', Icons.school),
           const SizedBox(height: 10),
           TextField(
             onChanged: (v) => setState(() {
@@ -448,9 +637,10 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
             ],
           const SizedBox(height: 28),
 
+          ],
+          if (_tab == 3) ...[
           // ---- Transactions ----
-          Text('Transaction History',
-              style: text.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const _Section('Transaction History', Icons.history_edu),
           const SizedBox(height: 10),
           DropdownButtonFormField<String>(
             value: _txFilter,
@@ -488,6 +678,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                 onChanged: (p) => setState(() => _txPage = p),
               ),
             ],
+          ],
         ],
       ),
     );
@@ -514,7 +705,8 @@ class _Badge extends StatelessWidget {
 
 class _Cover extends StatelessWidget {
   const _Cover({this.url = '', this.bytes, required this.color,
-      this.w = 40, this.h = 58});
+      this.w = 40, this.h = 58, this.title = ''});
+  final String title;
   final String url;
   final Uint8List? bytes;
   final Color color;
@@ -525,8 +717,36 @@ class _Cover extends StatelessWidget {
     final placeholder = Container(
       width: w,
       height: h,
-      decoration:
-          BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(3),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x33000000), blurRadius: 6, offset: Offset(0, 3)),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(width: w * 0.08, color: Colors.black.withAlpha(40)),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Text(
+                title,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Palette.gold,
+                  fontFamily: 'Georgia',
+                  fontWeight: FontWeight.w700,
+                  fontSize: w * 0.15,
+                  height: 1.15,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
     Widget child = placeholder;
     if (bytes != null) {
@@ -561,13 +781,20 @@ class _CatalogCard extends StatelessWidget {
     return Card(
       elevation: 0,
       color: Palette.card,
+      shape: _cardShape,
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Cover(url: book.imageUrl, bytes: book.imageBytes, color: book.color),
+            _Cover(
+                url: book.imageUrl,
+                bytes: book.imageBytes,
+                color: book.color,
+                title: book.title,
+                w: 56,
+                h: 80),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1331,6 +1558,861 @@ class _BookFormState extends State<_BookForm> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+// ---------- Bulk import ----------
+
+const _csvTemplate = '''title,author,publisher,category,published,copies,description,image
+The Hobbit,J.R.R. Tolkien,Allen & Unwin,Fantasy,1937-09-21,3,A hobbit goes on an unexpected adventure.,
+A Brief History of Time,Stephen Hawking,Bantam Books,Science,1988-04-01,2,An introduction to cosmology for general readers.,https://example.com/cover.jpg
+''';
+
+/// Minimal CSV parser: handles quotes, commas and line breaks inside quotes.
+List<List<String>> _parseCsv(String input) {
+  final rows = <List<String>>[];
+  var row = <String>[];
+  final cell = StringBuffer();
+  var inQuotes = false;
+
+  void endRow() {
+    row.add(cell.toString());
+    cell.clear();
+    if (row.any((c) => c.trim().isNotEmpty)) rows.add(row);
+    row = <String>[];
+  }
+
+  for (var i = 0; i < input.length; i++) {
+    final c = input[i];
+    if (inQuotes) {
+      if (c == '"') {
+        if (i + 1 < input.length && input[i + 1] == '"') {
+          cell.write('"');
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell.write(c);
+      }
+    } else if (c == '"') {
+      inQuotes = true;
+    } else if (c == ',') {
+      row.add(cell.toString());
+      cell.clear();
+    } else if (c == '\n' || c == '\r') {
+      if (c == '\r' && i + 1 < input.length && input[i + 1] == '\n') i++;
+      endRow();
+    } else {
+      cell.write(c);
+    }
+  }
+  endRow();
+  return rows;
+}
+
+class _ImportRow {
+  _ImportRow(this.line, this.label);
+  final int line; // row number in the file (header = 1)
+  final String label;
+  Book? book;
+  final errors = <String>[];
+  bool get ok => book != null && errors.isEmpty;
+}
+
+class _ImportSheet extends StatefulWidget {
+  const _ImportSheet();
+
+  @override
+  State<_ImportSheet> createState() => _ImportSheetState();
+}
+
+class _ImportSheetState extends State<_ImportSheet> {
+  static const _maxRows = 500;
+  static const _required = [
+    'title', 'author', 'publisher', 'category', 'published', 'description',
+  ];
+
+  String? _fileName;
+  String? _fileError;
+  List<_ImportRow> _rows = [];
+
+  List<_ImportRow> get _valid => _rows.where((r) => r.ok).toList();
+  List<_ImportRow> get _bad => _rows.where((r) => !r.ok).toList();
+
+  Future<void> _pick() async {
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['csv'],
+        withData: true,
+      );
+      if (res == null) return; // cancelled
+      final file = res.files.single;
+      final bytes = file.bytes;
+      if (bytes == null) {
+        setState(() => _fileError = 'Could not read that file.');
+        return;
+      }
+      var text = utf8.decode(bytes, allowMalformed: true);
+      if (text.startsWith('\uFEFF')) text = text.substring(1); // Excel BOM
+      _process(file.name, text);
+    } catch (_) {
+      setState(() => _fileError = 'Could not open the file picker.');
+    }
+  }
+
+  Future<void> _downloadTemplate() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      // BOM so Excel reads the file as UTF-8.
+      final bytes = Uint8List.fromList(
+          [0xEF, 0xBB, 0xBF, ...utf8.encode(_csvTemplate)]);
+      await downloadFile(bytes, 'books_import_template.csv', 'text/csv');
+    } catch (e) {
+      debugPrint('Template share failed: $e');
+      messenger.showSnackBar(
+          SnackBar(content: Text('Could not export the template: $e')));
+    }
+  }
+
+  void _process(String name, String text) {
+    final table = _parseCsv(text);
+    if (table.length < 2) {
+      setState(() {
+        _fileName = name;
+        _rows = [];
+        _fileError = 'The file needs a header row and at least one book.';
+      });
+      return;
+    }
+
+    // Map header names (case-insensitive) to column positions.
+    final head = <String, int>{};
+    for (var i = 0; i < table.first.length; i++) {
+      var h = table.first[i].trim().toLowerCase().replaceAll(' ', '');
+      if (h == 'totalcopies' || h == 'numberofcopies') h = 'copies';
+      if (h == 'imageurl' || h == 'imagelink') h = 'image';
+      if (h == 'datepublished') h = 'published';
+      head[h] = i;
+    }
+    final missing = _required.where((k) => !head.containsKey(k)).toList();
+    if (missing.isNotEmpty) {
+      setState(() {
+        _fileName = name;
+        _rows = [];
+        _fileError = 'Missing column(s): ${missing.join(', ')}.';
+      });
+      return;
+    }
+
+    String cellOf(List<String> r, String key) {
+      final i = head[key];
+      return (i == null || i >= r.length) ? '' : r[i].trim();
+    }
+
+    // Existing books + earlier rows count as duplicates (title + author).
+    String keyOf(String t, String a) => '${t.toLowerCase()}|${a.toLowerCase()}';
+    final seen = <String>{
+      for (final b in LibraryService.instance.books) keyOf(b.title, b.author),
+    };
+
+    final out = <_ImportRow>[];
+    final body = table.skip(1).take(_maxRows).toList();
+    for (var i = 0; i < body.length; i++) {
+      final r = body[i];
+      final title = cellOf(r, 'title');
+      final row = _ImportRow(i + 2, title.isEmpty ? '(no title)' : title);
+
+      void check(String? e) {
+        if (e != null) row.errors.add(e);
+      }
+
+      check(Validators.bookTitle(title));
+      final author = cellOf(r, 'author');
+      check(Validators.bookAuthor(author));
+      final publisher = cellOf(r, 'publisher');
+      check(Validators.publisher(publisher));
+
+      final catRaw = cellOf(r, 'category');
+      final category = _categories.firstWhere(
+          (c) => c.toLowerCase() == catRaw.toLowerCase(),
+          orElse: () => '');
+      if (category.isEmpty) {
+        row.errors.add('Category must be one of: ${_categories.join(', ')}.');
+      }
+
+      final pubRaw = cellOf(r, 'published');
+      final published = DateTime.tryParse(pubRaw);
+      check(Validators.publishedDate(published));
+      if (published == null && pubRaw.isNotEmpty) {
+        row.errors.add('Use the date format YYYY-MM-DD.');
+      }
+
+      final copiesRaw = cellOf(r, 'copies');
+      final copies = copiesRaw.isEmpty ? '1' : copiesRaw;
+      check(Validators.copies(copies));
+
+      final desc = cellOf(r, 'description');
+      check(Validators.description(desc));
+      final image = cellOf(r, 'image');
+      check(Validators.imageUrl(image));
+
+      if (row.errors.isEmpty) {
+        final k = keyOf(title, author);
+        if (seen.contains(k)) {
+          row.errors.add('Duplicate: this title and author already exist.');
+        } else {
+          seen.add(k);
+          final n = int.parse(copies);
+          row.book = Book(
+            title: title,
+            author: author,
+            publisher: publisher,
+            category: category,
+            color: Palette.burgundy,
+            description: desc,
+            published: published,
+            totalCopies: n,
+            copiesAvailable: n,
+            imageUrl: image,
+          );
+        }
+      }
+      out.add(row);
+    }
+
+    setState(() {
+      _fileName = name;
+      _fileError = table.length - 1 > _maxRows
+          ? 'Only the first $_maxRows rows were read.'
+          : null;
+      _rows = out;
+    });
+  }
+
+  void _import() {
+    final books = _valid.map((r) => r.book!).toList();
+    final n = LibraryService.instance.addAll(books);
+    final skipped = _bad.length;
+    Navigator.pop(
+      context,
+      'Imported $n ${n == 1 ? 'book' : 'books'}'
+      '${skipped > 0 ? ' ($skipped skipped)' : ''}.',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final valid = _valid.length;
+    final bad = _bad;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // ---- Header ----
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(20, 18, 8, 18),
+          color: Palette.burgundy,
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: const BoxDecoration(
+                    color: Palette.cream, shape: BoxShape.circle),
+                child: const Icon(Icons.library_add,
+                    color: Palette.burgundy, size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Bulk Import',
+                        style: TextStyle(
+                          fontFamily: 'Georgia',
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: Palette.creamLight,
+                        )),
+                    Text('Add many books at once from a CSV file',
+                        style: TextStyle(
+                            fontSize: 13, color: Palette.creamMuted)),
+                  ],
+                ),
+              ),
+              IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.close),
+                color: Palette.creamLight,
+              ),
+            ],
+          ),
+        ),
+        Container(height: 3, color: Palette.amber),
+
+        // ---- Body ----
+        Flexible(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Step 1
+                _StepCard(
+                  step: 1,
+                  title: 'Download the template',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'A ready-made .csv with the right columns and two '
+                        'sample books. Open it in Excel or Google Sheets.',
+                        style: TextStyle(
+                            fontSize: 13, color: Palette.textMuted),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _downloadTemplate,
+                          icon: const Icon(Icons.download, size: 18),
+                          label: const Text('Download template (.csv)'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Palette.burgundy,
+                            side: const BorderSide(
+                                color: Palette.amber, width: 1.5),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Step 2
+                _StepCard(
+                  step: 2,
+                  title: 'Fill in your books',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'One book per row. Keep the first row (the headers) '
+                        'exactly as it is. This is how it should look:',
+                        style: TextStyle(
+                            fontSize: 13, color: Palette.textMuted),
+                      ),
+                      const SizedBox(height: 10),
+                      const _SamplePreview(),
+                      const SizedBox(height: 16),
+                      const Text('What goes in each column',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: Palette.burgundy)),
+                      const SizedBox(height: 8),
+                      for (final g in _guide)
+                        _GuideRow(
+                          name: g.$1,
+                          required: g.$2,
+                          rule: g.$3,
+                          example: g.$4,
+                        ),
+                      const SizedBox(height: 8),
+                      const Text('Allowed categories',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: Palette.burgundy)),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final c in _categories)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Palette.cream,
+                                borderRadius: BorderRadius.circular(99),
+                                border: Border.all(
+                                    color: Palette.burgundy.withAlpha(90)),
+                              ),
+                              child: Text(c,
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Palette.burgundy,
+                                      fontWeight: FontWeight.w600)),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      const _TipBox(tips: [
+                        'In Excel: File > Save As > "CSV (Comma delimited)".',
+                        'If a value contains a comma, wrap it in "quotes".',
+                        'Delete the two sample rows before importing real data.',
+                        'Up to 500 rows per file. Books already in the '
+                            'catalog (same title and author) are skipped.',
+                      ]),
+                    ],
+                  ),
+                ),
+
+                // Step 3
+                _StepCard(
+                  step: 3,
+                  title: 'Upload your file',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      InkWell(
+                        onTap: _pick,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 22, horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: Palette.cream.withAlpha(120),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: Palette.burgundy.withAlpha(110),
+                                width: 1.4),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(
+                                _fileName == null
+                                    ? Icons.upload_file
+                                    : Icons.description_outlined,
+                                size: 34,
+                                color: Palette.burgundy,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _fileName ?? 'Tap to choose a .csv file',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: Palette.burgundy),
+                              ),
+                              if (_fileName != null)
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 2),
+                                  child: Text('Tap to choose a different file',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Palette.textMuted)),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (_fileError != null) ...[
+                        const SizedBox(height: 10),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.error_outline,
+                                size: 18, color: Color(0xFFC0121F)),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(_fileError!,
+                                  style: const TextStyle(
+                                      color: Color(0xFFC0121F),
+                                      fontWeight: FontWeight.w600)),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                // Results
+                if (_rows.isNotEmpty) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _ResultTile(
+                            label: 'Ready to import',
+                            value: valid,
+                            color: const Color(0xFF0C7A43),
+                            icon: Icons.check_circle_outline),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _ResultTile(
+                            label: 'Will be skipped',
+                            value: bad.length,
+                            color: const Color(0xFFC0121F),
+                            icon: Icons.warning_amber_rounded),
+                      ),
+                    ],
+                  ),
+                  if (bad.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFC0121F).withAlpha(18),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: const Color(0xFFC0121F).withAlpha(90)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Fix these rows and upload again:',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFC0121F))),
+                          const SizedBox(height: 8),
+                          for (final r in bad.take(20))
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Row ${r.line} · ${r.label}',
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700)),
+                                  Text(r.errors.join(' '),
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Palette.textDark)),
+                                ],
+                              ),
+                            ),
+                          if (bad.length > 20)
+                            Text('...and ${bad.length - 20} more.',
+                                style: const TextStyle(
+                                    fontSize: 12, color: Palette.textMuted)),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: valid == 0 ? null : _import,
+                      icon: const Icon(Icons.auto_stories),
+                      label: Text(valid == 0
+                          ? 'Nothing to import'
+                          : 'Import $valid ${valid == 1 ? 'book' : 'books'}'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Palette.burgundy,
+                        foregroundColor: Palette.creamLight,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: BorderSide(
+                              color: valid == 0
+                                  ? Colors.transparent
+                                  : Palette.amber,
+                              width: 1.5),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------- Import sheet helpers ----------
+
+// (column, required?, rule, example)
+const _guide = <(String, bool, String, String)>[
+  ('title', true, '2 to 100 characters', 'The Hobbit'),
+  ('author', true, 'Letters only, up to 60', 'J.R.R. Tolkien'),
+  ('publisher', true, 'Up to 60 characters', 'Allen & Unwin'),
+  ('category', true, 'Pick from the list below', 'Fantasy'),
+  ('published', true, 'YYYY-MM-DD, not in the future', '1937-09-21'),
+  ('description', true, '10 to 300 characters', 'A hobbit goes on an adventure.'),
+  ('copies', false, 'Whole number 1 to 99 (blank = 1)', '3'),
+  ('image', false, 'Link starting with https://', 'https://site.com/cover.jpg'),
+];
+
+class _StepCard extends StatelessWidget {
+  const _StepCard(
+      {required this.step, required this.title, required this.child});
+  final int step;
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Palette.card,
+      shape: _cardShape,
+      margin: const EdgeInsets.only(bottom: 14),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 13,
+                  backgroundColor: Palette.burgundy,
+                  child: Text('$step',
+                      style: const TextStyle(
+                          color: Palette.creamLight,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(title,
+                      style: const TextStyle(
+                        fontFamily: 'Georgia',
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Palette.burgundy,
+                      )),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GuideRow extends StatelessWidget {
+  const _GuideRow({
+    required this.name,
+    required this.required,
+    required this.rule,
+    required this.example,
+  });
+  final String name;
+  final bool required;
+  final String rule;
+  final String example;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 92,
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            decoration: BoxDecoration(
+              color: Palette.burgundy,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(name,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: Palette.creamLight,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(rule,
+                          style: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                    Text(required ? 'Required' : 'Optional',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: required
+                                ? const Color(0xFFC0121F)
+                                : Palette.textMuted)),
+                  ],
+                ),
+                Text('e.g. $example',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 12, color: Palette.textMuted)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SamplePreview extends StatelessWidget {
+  const _SamplePreview();
+
+  static const _head = [
+    'title', 'author', 'publisher', 'category',
+    'published', 'description', 'copies', 'image',
+  ];
+  static const _rows = [
+    [
+      'The Hobbit', 'J.R.R. Tolkien', 'Allen & Unwin', 'Fantasy',
+      '1937-09-21', 'A hobbit goes on...', '3', '',
+    ],
+    [
+      'A Brief History of Time', 'Stephen Hawking', 'Bantam Books',
+      'Science', '1988-04-01', 'An intro to cosmology...', '2',
+      'https://...',
+    ],
+  ];
+
+  Widget _cell(String t, {bool head = false}) => Container(
+        width: 118,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+        child: Text(t,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: head ? FontWeight.w700 : FontWeight.w500,
+              color: head ? Palette.creamLight : Palette.textDark,
+            )),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: Palette.burgundy.withAlpha(80)),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Column(
+            children: [
+              Container(
+                color: Palette.burgundy,
+                child: Row(children: [
+                  for (final h in _head) _cell(h, head: true),
+                ]),
+              ),
+              for (var i = 0; i < _rows.length; i++)
+                Container(
+                  color: i.isEven
+                      ? Palette.cream.withAlpha(110)
+                      : Colors.white,
+                  child: Row(children: [
+                    for (final c in _rows[i]) _cell(c),
+                  ]),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TipBox extends StatelessWidget {
+  const _TipBox({required this.tips});
+  final List<String> tips;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Palette.amber.withAlpha(30),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Palette.amber.withAlpha(120)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final t in tips)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.lightbulb_outline,
+                      size: 16, color: Palette.amber),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(t, style: const TextStyle(fontSize: 12.5)),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ResultTile extends StatelessWidget {
+  const _ResultTile({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.icon,
+  });
+  final String label;
+  final int value;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withAlpha(22),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withAlpha(90)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 26),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$value',
+                    style: TextStyle(
+                        fontFamily: 'Georgia',
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                        color: color)),
+                Text(label,
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
