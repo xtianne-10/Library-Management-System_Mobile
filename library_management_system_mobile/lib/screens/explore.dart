@@ -213,6 +213,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
     // Categories come from books.json, not a hard-coded list.
     final categories = categoriesOf(_books);
     final results = _results;
+    final newArrivals = _books.where((b) => b.isNewArrival).toList();
+    final popular = _books.where((b) => b.isPopular).toList();
     final text = Theme.of(context).textTheme;
 
     return Column(
@@ -295,30 +297,60 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
         // Results
         Expanded(
-          child: results.isEmpty
-              ? _MessageState(
-                  icon: Icons.search_off,
-                  message: 'No books match your search.',
-                  actionLabel: _hasFilters ? 'Clear filters' : null,
-                  onAction: _hasFilters ? _clearFilters : null,
-                )
-              : GridView.builder(
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 20,
-                    childAspectRatio: 0.58,
-                  ),
-                  itemCount: results.length,
-                  itemBuilder: (context, i) => _BookCard(
-                    book: results[i],
-                    onTap: () => openBookDetails(context, results[i]),
+          child: CustomScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            slivers: [
+              // Discovery shelves only show when nothing is filtered
+              if (!_hasFilters) ...[
+                SliverToBoxAdapter(
+                  child: _Shelf(title: 'New arrivals', books: newArrivals),
+                ),
+                SliverToBoxAdapter(
+                  child: _Shelf(title: 'Popular this week', books: popular),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
+                    child: Text('All books',
+                        style: text.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: Palette.burgundy,
+                        )),
                   ),
                 ),
+              ],
+              if (results.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _MessageState(
+                    icon: Icons.search_off,
+                    message: 'No books match your search.',
+                    actionLabel: _hasFilters ? 'Clear filters' : null,
+                    onAction: _hasFilters ? _clearFilters : null,
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 16,
+                      mainAxisSpacing: 20,
+                      childAspectRatio: 0.58,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, i) => _BookCard(
+                        book: results[i],
+                        onTap: () => openBookDetails(context, results[i]),
+                      ),
+                      childCount: results.length,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ],
     );
@@ -326,6 +358,71 @@ class _ExploreScreenState extends State<ExploreScreen> {
 }
 
 // Widgets
+
+class _Shelf extends StatelessWidget {
+  const _Shelf({required this.title, required this.books});
+
+  final String title;
+  final List<Book> books;
+
+  @override
+  Widget build(BuildContext context) {
+    if (books.isEmpty) return const SizedBox.shrink();
+    final text = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+          child: Text(title,
+              style: text.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: Palette.burgundy,
+              )),
+        ),
+        SizedBox(
+          height: 245,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            itemCount: books.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 16),
+            itemBuilder: (context, i) {
+              final b = books[i];
+              return SizedBox(
+                width: 120,
+                child: InkWell(
+                  onTap: () => openBookDetails(context, b),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(width: 120, height: 170, child: _Cover(book: b)),
+                      const SizedBox(height: 10),
+                      Text(b.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: Palette.textDark,
+                          )),
+                      Text(b.author,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.bodySmall
+                              ?.copyWith(color: Palette.textMuted)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 class _BookCard extends StatelessWidget {
   const _BookCard({required this.book, required this.onTap});

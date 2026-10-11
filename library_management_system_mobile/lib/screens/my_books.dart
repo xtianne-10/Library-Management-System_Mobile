@@ -309,19 +309,12 @@ class _LoanCardState extends State<_LoanCard> {
                                   color: statusColor.withAlpha(31),
                                   borderRadius: BorderRadius.circular(20),
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.circle,
-                                        size: 8, color: statusColor),
-                                    const SizedBox(width: 6),
-                                    Text(statusLabel,
-                                        style: text.labelSmall?.copyWith(
-                                          color: statusColor,
-                                          fontWeight: FontWeight.w700,
-                                          letterSpacing: 0.5,
-                                        )),
-                                  ],
+                                child: Text(statusLabel,
+                                  style: text.labelSmall?.copyWith(
+                                    color: statusColor,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                  )
                                 ),
                               ),
                               const Spacer(),

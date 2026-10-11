@@ -9,7 +9,6 @@ import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/globes/borrow_store.dart';
 import 'package:library_management_system_mobile/screens/book_details.dart';
 
-
 String _greeting() {
   final h = DateTime.now().hour;
   if (h < 12) return 'Good morning';
@@ -25,7 +24,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String _selectedCategory = 'All';
   List<Book> _books = [];
   bool _loading = true;
 
@@ -45,12 +43,20 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  List<Book> get _newArrivals => _books.where((b) => b.isNewArrival).toList();
-  List<Book> get _popular => _books.where((b) => b.isPopular).toList();
+  // Featured picks: popular or new, available, and not already borrowed
+  List<Book> get _recommended {
+    final store = BorrowStore.instance;
+    return _books
+        .where((b) =>
+            (b.isPopular || b.isNewArrival) &&
+            store.isAvailable(b) &&
+            !store.isBorrowed(b))
+        .take(8)
+        .toList();
+  }
 
-  List<Book> get _filteredPopular => _selectedCategory == 'All'
-      ? _popular
-      : _popular.where((b) => b.category == _selectedCategory).toList();
+  void _goMyBooks() => Navigator.pushReplacementNamed(context, '/mybooks');
+  void _goExplore() => Navigator.pushReplacementNamed(context, '/explore');
 
   @override
   Widget build(BuildContext context) {
@@ -68,16 +74,15 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // Categories come from books.json, not a hard-coded list.
-    final categories = categoriesOf(_books);
+    final recommended = _recommended;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light, // light status bar icons on burgundy
+      value: SystemUiOverlayStyle.light,
       child: Scaffold(
         body: ListView(
           padding: EdgeInsets.zero,
           children: [
-            // Burgundy header (greeting + search)
+            // Welcome header
             Container(
               padding: EdgeInsets.fromLTRB(20, topInset + 16, 20, 24),
               decoration: const BoxDecoration(
@@ -87,67 +92,68 @@ class _HomeScreenState extends State<HomeScreen> {
                   bottomRight: Radius.circular(28),
                 ),
               ),
-              child: Column(
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('${_greeting()}, $firstName',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: text.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  color: Palette.creamLight,
-                                )),
-                            const SizedBox(height: 2),
-                            Text('Knowledge is the truest magic.',
-                                style: text.bodyMedium?.copyWith(
-                                  color: Palette.creamMuted,
-                                )),
-                          ],
-                        ),
-                      ),
-                      CircleAvatar(
-                        radius: 22,
-                        backgroundColor: Palette.cream,
-                        backgroundImage: user?.avatar != null
-                            ? MemoryImage(user!.avatar!)
-                            : null,
-                        child: user?.avatar == null
-                            ? Text(
-                                user?.initial ?? '?',
-                                style: const TextStyle(
-                                  color: Palette.burgundy,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              )
-                            : null,
-                      ),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${_greeting()}, $firstName',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: text.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: Palette.creamLight,
+                            )),
+                        const SizedBox(height: 2),
+                        Text('Knowledge is the truest magic.',
+                            style: text.bodyMedium?.copyWith(
+                              color: Palette.creamMuted,
+                            )),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 18),
-                  const SearchBar(
-                    hintText: 'Search titles, authors, or topics',
-                    hintStyle: WidgetStatePropertyAll(
-                      TextStyle(color: Palette.textMuted),
-                    ),
-                    textStyle: WidgetStatePropertyAll(
-                      TextStyle(color: Palette.textDark),
-                    ),
-                    leading: Icon(Icons.search, color: Palette.burgundy),
-                    backgroundColor: WidgetStatePropertyAll(Palette.cream),
-                    elevation: WidgetStatePropertyAll(0),
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: Palette.cream,
+                    backgroundImage: user?.avatar != null
+                        ? MemoryImage(user!.avatar!)
+                        : null,
+                    child: user?.avatar == null
+                        ? Text(
+                            user?.initial ?? '?',
+                            style: const TextStyle(
+                              color: Palette.burgundy,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          )
+                        : null,
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 24),
 
-            // Due soon
-            const _SectionTitle('Due soon'),
+            // Borrowing summary
+            ListenableBuilder(
+              listenable: BorrowStore.instance,
+              builder: (context, _) {
+                final store = BorrowStore.instance;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _SummaryCard(
+                    borrowed: store.items.length,
+                    overdue: store.overdue.length,
+                    returned: store.history.length,
+                    onTap: _goMyBooks,
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 28),
+
+            // Due soon (nearest one + a link)
+            _SectionTitle('Due soon', onSeeAll: _goMyBooks),
             const SizedBox(height: 12),
             ListenableBuilder(
               listenable: BorrowStore.instance,
@@ -156,88 +162,50 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (loans.isEmpty) {
                   return const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 20),
-                    child: Text('No borrowed books yet. Tap a book to borrow it.'),
+                    child: Text(
+                        'No borrowed books yet. Head to Explore to find one.'),
                   );
                 }
-                // Show the loan that's due the soonest.
                 final next =
                     loans.reduce((a, b) => a.dueOn.isBefore(b.dueOn) ? a : b);
+                final more = loans.length - 1;
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: _DueSoonCard(book: next.book, daysLeft: next.daysLeft),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _DueSoonCard(book: next.book, daysLeft: next.daysLeft),
+                      if (more > 0)
+                        TextButton(
+                          onPressed: _goMyBooks,
+                          child: Text('+ $more more on loan'),
+                        ),
+                    ],
+                  ),
                 );
               },
             ),
             const SizedBox(height: 28),
 
-            // Categories
-            const _SectionTitle('Browse by category'),
+            // Recommended
+            _SectionTitle('Recommended for you', onSeeAll: _goExplore),
             const SizedBox(height: 12),
-            SizedBox(
-              height: 40,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: categories.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (context, i) {
-                  final c = categories[i];
-                  final color = categoryChipColor(c);
-                  final selected = c == _selectedCategory;
-                  return ChoiceChip(
-                    label: Text(c),
-                    selected: selected,
-                    showCheckmark: false,
-                    backgroundColor: Palette.page,
-                    selectedColor: color,
-                    side: BorderSide(color: color, width: 1.2),
-                    labelStyle: TextStyle(
-                      fontFamily: 'Georgia',
-                      color: selected ? Colors.white : color,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    onSelected: (_) => setState(() => _selectedCategory = c),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 28),
-
-            // New arrivals
-            const _SectionTitle('New arrivals'),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 250,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: _newArrivals.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 16),
-                itemBuilder: (context, i) =>
-                    _BookTile(book: _newArrivals[i]),
-              ),
-            ),
-            const SizedBox(height: 28),
-
-            // Popular
-            _SectionTitle(
-              _selectedCategory == 'All'
-                  ? 'Popular this week'
-                  : 'Popular in $_selectedCategory',
-            ),
-            const SizedBox(height: 12),
-            if (_filteredPopular.isEmpty)
+            if (recommended.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20),
-                child: Text('No popular books in this category yet.'),
+                child: Text('No recommendations right now.'),
               )
             else
-              for (final book in _filteredPopular)
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-                  child: _BookRow(book: book),
+              SizedBox(
+                height: 250,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  itemCount: recommended.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 16),
+                  itemBuilder: (context, i) => _BookTile(book: recommended[i]),
                 ),
+              ),
             const SizedBox(height: 24),
           ],
         ),
@@ -250,8 +218,9 @@ class _HomeScreenState extends State<HomeScreen> {
 // Widgets
 
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.title);
+  const _SectionTitle(this.title, {this.onSeeAll});
   final String title;
+  final VoidCallback? onSeeAll;
 
   @override
   Widget build(BuildContext context) {
@@ -268,8 +237,74 @@ class _SectionTitle extends StatelessWidget {
                   ),
             ),
           ),
-          TextButton(onPressed: () {}, child: const Text('See all')),
+          if (onSeeAll != null)
+            TextButton(onPressed: onSeeAll, child: const Text('See all')),
         ],
+      ),
+    );
+  }
+}
+
+// Borrowing summary
+
+class _SummaryCard extends StatelessWidget {
+  const _SummaryCard({
+    required this.borrowed,
+    required this.overdue,
+    required this.returned,
+    required this.onTap,
+  });
+
+  final int borrowed;
+  final int overdue;
+  final int returned;
+  final VoidCallback onTap;
+
+  Widget _stat(BuildContext context, int value, String label, {Color? color}) {
+    final text = Theme.of(context).textTheme;
+    return Expanded(
+      child: Column(
+        children: [
+          Text('$value',
+              style: text.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: color ?? Palette.burgundy,
+              )),
+          const SizedBox(height: 2),
+          Text(label,
+              style: text.bodySmall?.copyWith(color: Palette.textMuted)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Palette.card,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0x2655161D)),
+          ),
+          child: Row(
+            children: [
+              _stat(context, borrowed, 'Borrowed'),
+              _stat(context, overdue, 'Overdue',
+                  color: overdue == 0 ? null : Colors.red.shade700),
+              _stat(context, returned, 'Returned'),
+              const Padding(
+                padding: EdgeInsets.only(right: 8),
+                child: Icon(Icons.chevron_right, color: Palette.textMuted),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -338,7 +373,7 @@ class _BookCover extends StatelessWidget {
   }
 }
 
-// New Arrivals
+// Recommended tile
 
 class _BookTile extends StatelessWidget {
   const _BookTile({required this.book});
@@ -371,85 +406,6 @@ class _BookTile extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// Popular List
-class _BookRow extends StatelessWidget {
-  const _BookRow({required this.book});
-  final Book book;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-
-    return ListenableBuilder(
-      listenable: BorrowStore.instance,
-      builder: (context, _) {
-        final isAvail = BorrowStore.instance.isAvailable(book);
-        return Card(
-          elevation: 0,
-          margin: EdgeInsets.zero,
-          color: Palette.card,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: Color(0x2655161D)),
-          ),
-          child: InkWell(
-            onTap: () => openBookDetails(context, book),
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  _BookCover(book: book, width: 56, height: 80),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(book.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: text.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: Palette.textDark,
-                            )),
-                        const SizedBox(height: 2),
-                        Text(book.author,
-                            style: text.bodyMedium
-                                ?.copyWith(color: Palette.textMuted)),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Icon(
-                              isAvail ? Icons.check_circle : Icons.schedule,
-                              size: 16,
-                              color: isAvail ? Palette.slytherin : Palette.amber,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              isAvail ? 'Available' : 'On hold',
-                              style: text.bodySmall?.copyWith(color: Palette.textDark),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () {},
-                    tooltip: 'Save for later',
-                    color: Palette.burgundy,
-                    icon: const Icon(Icons.bookmark_add_outlined),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }
@@ -489,7 +445,10 @@ class _DueSoonCard extends StatelessWidget {
                     style: text.bodyMedium
                         ?.copyWith(color: Palette.creamMuted)),
                 const SizedBox(height: 8),
-                Text(daysLeft < 0 ? '${-daysLeft} days overdue' : 'Due in $daysLeft days',
+                Text(
+                    daysLeft < 0
+                        ? '${-daysLeft} days overdue'
+                        : 'Due in $daysLeft days',
                     style: text.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                       color: Palette.cream,

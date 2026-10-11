@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/screens/register.dart';
@@ -37,6 +38,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Hogwarts Library',
       debugShowCheckedModeBanner: false,
+      scrollBehavior: AppScrollBehavior(),
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: scheme,
@@ -91,7 +93,17 @@ class MyApp extends StatelessWidget {
   }
 }
 
-/// Sends users to the right place if their role doesn't match the screen.
+class AppScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
+}
+
+// Role Guard
 class RoleGuard extends StatelessWidget {
   const RoleGuard({super.key, required this.allow, required this.child});
   final UserRole allow;
