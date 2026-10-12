@@ -1,6 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../config/api_config.dart';
 
 enum UserRole { student, professor, librarian }
 
@@ -110,6 +113,8 @@ class AuthService extends ChangeNotifier {
     ),
   ];
 
+  String? _token;
+  String? get token => _token;
   AppUser? _current;
   AppUser? get currentUser => _current;
   bool get isLoggedIn => _current != null;
@@ -148,6 +153,69 @@ class AuthService extends ChangeNotifier {
     return 'Incorrect email or password.';
   }
 
+  /// Logs in against the Express API. Returns an error message, or null on success.
+  Future<String?> loginApi(String email, String password) async {
+    try {
+      final res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': _norm(email), 'password': password}),
+      );
+      final data = jsonDecode(res.body);
+      if (res.statusCode != 200) {
+        return data['error'] ?? 'Something went wrong.';
+      }
+      final u = data['user'];
+      _token = data['token'];
+      _current = AppUser(
+        firstName: u['firstName'] ?? '',
+        lastName: u['lastName'] ?? '',
+        email: u['email'] ?? '',
+        phone: u['phone_number'] ?? '',
+        idNumber: u['idNumber'] ?? '',
+        course: u['course'] ?? '',
+        yearLevel: u['yearLevel'] ?? '',
+        department: u['department'] ?? '',
+        password: '',
+        role: UserRole.values.asNameMap()[u['role']] ?? UserRole.student,
+      );
+      notifyListeners();
+      return null;
+    } catch (_) {
+      return 'Cannot reach the server.';
+    }
+  }
+
+    /// Registers against the Express API. Returns an error message, or null on success.
+  Future<String?> registerApi(AppUser user) async {
+    if (user.role == UserRole.librarian) {
+      return 'Librarian accounts can only be created by an administrator.';
+    }
+    try {
+      final res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/auth/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'role': user.role.name,
+          'firstName': user.firstName,
+          'lastName': user.lastName,
+          'email': _norm(user.email),
+          'phone_number': user.phone,
+          'password': user.password,
+          'idNumber': user.idNumber,
+          'course': user.course,
+          'yearLevel': user.yearLevel,
+          'department': user.department,
+        }),
+      );
+      if (res.statusCode == 201) return null;
+      final data = jsonDecode(res.body);
+      return data['error'] ?? 'Something went wrong.';
+    } catch (_) {
+      return 'Cannot reach the server.';
+    }
+  }
+
   /// Returns an error message, or null on success.
   String? changePassword(String current, String next) {
     final me = _current;
@@ -164,6 +232,7 @@ class AuthService extends ChangeNotifier {
 
   void logout() {
     _current = null;
+    _token = null;
     notifyListeners();
   }
 

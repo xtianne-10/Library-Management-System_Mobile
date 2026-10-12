@@ -51,12 +51,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
 
     final role = _role!;
-    final error = AuthService.instance.register(AppUser(
+    final error = await AuthService.instance.registerApi(AppUser(
       firstName: _first.text.trim(),
       lastName: _last.text.trim(),
       email: _email.text.trim(),
@@ -70,6 +70,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       assignedRole:
           role == UserRole.librarian ? _assignedRole.text.trim() : '',
     ));
+    if (!mounted) return;
     if (error != null) {
       setState(() => _error = error);
       return;
