@@ -4,14 +4,6 @@ import 'package:flutter/foundation.dart';
 
 enum UserRole { student, professor, librarian }
 
-const yearLevelOptions = [
-  '1st Year',
-  '2nd Year',
-  '3rd Year',
-  '4th Year',
-  '5th Year',
-];
-
 class AppUser {
   const AppUser({
     required this.firstName,
@@ -21,6 +13,7 @@ class AppUser {
     required this.password,
     this.role = UserRole.student,
     this.avatar,
+    this.employeeId = '',
     this.idNumber = '',
     this.course = '',
     this.yearLevel = '',
@@ -34,6 +27,7 @@ class AppUser {
   final String phone;
   final String password;
   final UserRole role;
+  final String employeeId;
 
   final Uint8List? avatar;
 
@@ -53,6 +47,7 @@ class AppUser {
     String? lastName,
     String? email,
     String? phone,
+    String? password,
     Uint8List? avatar,
     bool clearAvatar = false,
     String? idNumber,
@@ -66,8 +61,9 @@ class AppUser {
         lastName: lastName ?? this.lastName,
         email: email ?? this.email,
         phone: phone ?? this.phone,
-        password: password,
+        password: password ?? this.password,
         role: role,
+        employeeId: employeeId,
         avatar: clearAvatar ? null : (avatar ?? this.avatar),
         idNumber: idNumber ?? this.idNumber,
         course: course ?? this.course,
@@ -109,8 +105,8 @@ class AuthService extends ChangeNotifier {
       phone: '09171234567',
       password: 'hogwarts1',
       role: UserRole.librarian,
-      idNumber: '2023-154214',
-      assignedRole: 'Head Librarian',
+      employeeId: 'LIB-0001',
+      assignedRole: 'Librarian',
     ),
   ];
 
@@ -121,12 +117,17 @@ class AuthService extends ChangeNotifier {
   List<AppUser> get students =>
       _users.where((u) => u.role == UserRole.student).toList();
 
-  List<AppUser> get professors =>
-      _users.where((u) => u.role == UserRole.professor).toList();
+  /// Students and professors (everyone who can borrow).
+  List<AppUser> get borrowers => _users
+      .where((u) => u.role == UserRole.student || u.role == UserRole.professor)
+      .toList();
 
   String _norm(String email) => email.trim().toLowerCase();
 
   String? register(AppUser user) {
+    if (user.role == UserRole.librarian) {
+      return 'Librarian accounts can only be created by an administrator.';
+    }
     final email = _norm(user.email);
     if (_users.any((u) => _norm(u.email) == email)) {
       return 'An account with this email already exists.';
@@ -147,6 +148,20 @@ class AuthService extends ChangeNotifier {
     return 'Incorrect email or password.';
   }
 
+  /// Returns an error message, or null on success.
+  String? changePassword(String current, String next) {
+    final me = _current;
+    if (me == null) return 'You are not signed in.';
+    if (me.password != current) return 'Current password is incorrect.';
+    if (next == current) return 'New password must differ from the current one.';
+    final updated = me.copyWith(password: next);
+    final i = _users.indexWhere((u) => identical(u, me));
+    if (i != -1) _users[i] = updated;
+    _current = updated;
+    notifyListeners();
+    return null;
+  }
+
   void logout() {
     _current = null;
     notifyListeners();
@@ -165,7 +180,7 @@ class AuthService extends ChangeNotifier {
   String? updateProfile({
     required String firstName,
     required String lastName,
-    required String email,
+    String? email,
     required String phone,
     String? idNumber,
     String? course,
@@ -175,7 +190,7 @@ class AuthService extends ChangeNotifier {
   }) {
     final me = _current;
     if (me == null) return 'You are not signed in.';
-    final newEmail = _norm(email);
+    final newEmail = _norm(email ?? me.email);
     if (_users.any((u) => !identical(u, me) && _norm(u.email) == newEmail)) {
       return 'Another account already uses this email.';
     }

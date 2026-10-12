@@ -57,6 +57,19 @@ class BookTransaction {
         finePaid: finePaid,
       );
 
+  BookTransaction withBook(Book b) => BookTransaction(
+        id: id,
+        bookId: bookId,
+        book: b,
+        title: b.title,
+        borrower: borrower,
+        borrowerEmail: borrowerEmail,
+        borrowedOn: borrowedOn,
+        due: due,
+        returnedOn: returnedOn,
+        finePaid: finePaid,
+      );
+
   BookTransaction markFinePaid() => BookTransaction(
         id: id,
         bookId: bookId,
@@ -121,12 +134,22 @@ class LibraryService extends ChangeNotifier {
     final i = _books.indexWhere((x) => x.id == b.id);
     if (i == -1) return;
     _books[i] = b;
+    for (var k = 0; k < _transactions.length; k++) {
+      if (_transactions[k].bookId == b.id) {
+        _transactions[k] = _transactions[k].withBook(b);
+      }
+    }
     notifyListeners();
   }
 
-  void remove(int id) {
+  /// Returns an error message, or null on success.
+  String? remove(int id) {
+    if (_transactions.any((t) => !t.returned && t.bookId == id)) {
+      return 'This book is currently borrowed and can\'t be deleted.';
+    }
     _books.removeWhere((x) => x.id == id);
     notifyListeners();
+    return null;
   }
 
   // ---- Availability ----
@@ -145,7 +168,7 @@ class LibraryService extends ChangeNotifier {
 
   AppUser? studentByEmail(String email) {
     final e = email.trim().toLowerCase();
-    for (final s in AuthService.instance.students) {
+    for (final s in AuthService.instance.borrowers) {
       if (s.email.trim().toLowerCase() == e) return s;
     }
     return null;
@@ -170,18 +193,18 @@ class LibraryService extends ChangeNotifier {
   String? eligibility(AppUser s, [Book? b]) {
     final active = activeLoansOf(s.email);
     if (active.any((t) => t.overdue)) {
-      return 'Student has overdue books. Return them first.';
+      return 'Borrower has overdue books. Return them first.';
     }
     final owed = finesOutstanding(s.email);
     if (owed > 0) {
-      return 'Student has unpaid fines (₱${owed.toStringAsFixed(2)}).';
+      return 'Borrower has unpaid fines (₱${owed.toStringAsFixed(2)}).';
     }
     if (active.length >= maxActiveLoans) {
       return 'Borrowing limit reached ($maxActiveLoans books).';
     }
     if (b != null) {
       if (active.any((t) => t.bookId == b.id)) {
-        return 'Student already has this book.';
+        return 'Borrower already has this book.';
       }
       if (!isAvailable(b)) return 'No copies available.';
     }

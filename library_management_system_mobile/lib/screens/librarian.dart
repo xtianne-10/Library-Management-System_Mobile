@@ -33,9 +33,37 @@ String _greeting() {
 }
 
 const _cardShape = RoundedRectangleBorder(
-  borderRadius: BorderRadius.all(Radius.circular(12)),
+  borderRadius: BorderRadius.all(Radius.circular(16)),
   side: BorderSide(color: Color(0x2655161D)),
 );
+
+const _statIcons = {
+  'Total Books': Icons.menu_book,
+  'Borrowed': Icons.bookmark,
+  'Overdue': Icons.warning_amber_rounded,
+  'Available': Icons.check_circle_outline,
+  'Students': Icons.school,
+  'Fines Due': Icons.payments_outlined,
+};
+
+OutlineInputBorder _border(Color c, [double w = 1]) => OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: c, width: w),
+    );
+
+InputDecoration _fieldDec({String? label, String? hint, Widget? prefix}) =>
+    InputDecoration(
+      labelText: label,
+      hintText: hint,
+      prefixIcon: prefix,
+      isDense: true,
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      border: _border(Palette.burgundy.withAlpha(50)),
+      enabledBorder: _border(Palette.burgundy.withAlpha(50)),
+      focusedBorder: _border(Palette.burgundy, 1.6),
+    );
 
 class _Section extends StatelessWidget {
   const _Section(this.title, this.icon);
@@ -84,22 +112,22 @@ class _LibNavBar extends StatelessWidget {
             icon: Icon(Icons.menu_book_outlined),
             selectedIcon: Icon(Icons.menu_book),
             label: 'Books'),
-        const NavigationDestination(
-            icon: Icon(Icons.school_outlined),
-            selectedIcon: Icon(Icons.school),
-            label: 'Students'),
         NavigationDestination(
             icon: Badge(
               isLabelVisible: overdue > 0,
               label: Text('$overdue'),
-              child: const Icon(Icons.history_edu_outlined),
+              child: const Icon(Icons.groups_outlined),
             ),
             selectedIcon: Badge(
               isLabelVisible: overdue > 0,
               label: Text('$overdue'),
-              child: const Icon(Icons.history_edu),
+              child: const Icon(Icons.groups),
             ),
-            label: 'Loans'),
+            label: 'Borrower'),
+        const NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'Profile'),
       ],
     );
   }
@@ -120,6 +148,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   bool _asc = true;
   String _txFilter = 'All Statuses';
   String _studentQuery = '';
+  int _borrowerView = 0; // 0 = Lookup, 1 = Transactions
 
   static const _pageSize = 5;
   int _catalogPage = 0;
@@ -201,14 +230,34 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   }
 
   Future<void> _openForm([Book? book]) async {
-    final result = await showModalBottomSheet<Book>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _BookForm(book: book),
+    final result = await Navigator.push<Book>(
+      context,
+      MaterialPageRoute(builder: (_) => _BookForm(book: book)),
     );
     if (result == null) return;
-    book == null ? _lib.add(result) : _lib.update(result);
+    final dup = _lib.books.any((b) =>
+        (book == null || b.id != book.id) &&
+        b.title.toLowerCase() == result.title.toLowerCase() &&
+        b.author.toLowerCase() == result.author.toLowerCase());
+    if (dup) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('A book with this title and author already exists.')));
+      }
+      return;
+    }
+    try {
+      book == null ? _lib.add(result) : _lib.update(result);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(book == null ? 'Book added.' : 'Book updated.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not save the book: $e')));
+      }
+    }
   }
 
   Future<void> _confirmLogout() async {
@@ -265,7 +314,12 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         ],
       ),
     );
-    if (ok == true) _lib.remove(b.id);
+    if (ok == true) {
+      final err = _lib.remove(b.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(err ?? 'Book deleted.')));
+    }
   }
 
   Future<void> _openIssue({Book? book, AppUser? student}) async {
@@ -298,6 +352,487 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     }
   }
 
+  int _countFor(String f) => switch (f) {
+        'Not Returned' => _lib.transactions.where((t) => !t.returned).length,
+        'Overdue' => _lib.transactions.where((t) => t.overdue).length,
+        'Returned' => _lib.transactions.where((t) => t.returned).length,
+        _ => _lib.transactions.length,
+      };
+
+  String _today() {
+    const days = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+      'Friday', 'Saturday', 'Sunday',
+    ];
+    final d = DateTime.now();
+    return '${days[d.weekday - 1]}, ${_fmt(d)}';
+  }
+
+  List<Widget> _overview(List<(String, String, Color)> stats) {
+    final overdue = _lib.transactions.where((t) => t.overdue).toList();
+    final recent = _lib.transactions.take(5).toList();
+    final now = DateTime.now();
+    bool isToday(DateTime? d) =>
+        d != null && d.year == now.year && d.month == now.month && d.day == now.day;
+    final borrowedToday =
+        _lib.transactions.where((t) => isToday(t.borrowedOn)).length;
+    final returnedToday =
+        _lib.transactions.where((t) => t.returned && isToday(t.returnedOn)).length;
+
+    return [
+      Text(_today(),
+          style: const TextStyle(
+              color: Palette.textMuted, fontStyle: FontStyle.italic)),
+      const SizedBox(height: 14),
+
+      // Quick actions
+      Row(
+        children: [
+          Expanded(
+              child: _QuickAction(
+                  icon: Icons.assignment_ind_outlined,
+                  label: 'Issue',
+                  onTap: () => _openIssue())),
+          const SizedBox(width: 10),
+          Expanded(
+              child: _QuickAction(
+                  icon: Icons.add_circle_outline,
+                  label: 'Add Book',
+                  onTap: () => _openForm())),
+          const SizedBox(width: 10),
+          Expanded(
+              child: _QuickAction(
+                  icon: Icons.upload_file,
+                  label: 'Import',
+                  onTap: _openImport)),
+          const SizedBox(width: 10),
+          Expanded(
+              child: _QuickAction(
+                  icon: Icons.person_search,
+                  label: 'Students',
+                  onTap: () => setState(() {
+                        _tab = 2;
+                        _borrowerView = 0;
+                      }))),
+        ],
+      ),
+      const SizedBox(height: 24),
+
+      // Stats
+      const _Section('Library at a Glance', Icons.auto_stories),
+      const SizedBox(height: 14),
+      GridView.count(
+        crossAxisCount: 2,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        childAspectRatio: 1.8,
+        children: [
+          for (final s in stats)
+            InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => _goStat(s.$1),
+              child: _StatTile(
+                label: s.$1,
+                value: s.$2,
+                color: s.$3,
+                icon: _statIcons[s.$1] ?? Icons.circle,
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: 28),
+
+      const _Section("Today's Summary", Icons.today),
+      const SizedBox(height: 12),
+      Row(
+        children: [
+          Expanded(
+            child: _ResultTile(
+                label: 'Borrowed today',
+                value: borrowedToday,
+                color: Palette.burgundy,
+                icon: Icons.north_east),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _ResultTile(
+                label: 'Returned today',
+                value: returnedToday,
+                color: const Color(0xFF0C7A43),
+                icon: Icons.assignment_return_outlined),
+          ),
+        ],
+      ),
+      const SizedBox(height: 28),
+
+      // Needs attention
+      const _Section('Needs Attention', Icons.notification_important_outlined),
+      const SizedBox(height: 12),
+      if (overdue.isEmpty)
+        const _EmptyNote(
+            icon: Icons.verified_outlined,
+            text: 'All quiet. No overdue books.')
+      else ...[
+        for (final t in overdue.take(3))
+          _TxCard(tx: t, onReturn: () => _returnTx(t)),
+        if (overdue.length > 3)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => setState(() {
+                _tab = 2;
+                _borrowerView = 1;
+                _txFilter = 'Overdue';
+                _txPage = 0;
+              }),
+              child: Text('View all ${overdue.length} overdue'),
+            ),
+          ),
+      ],
+      const SizedBox(height: 28),
+
+      // Recent activity
+      const _Section('Recent Activity', Icons.history),
+      const SizedBox(height: 12),
+      if (recent.isEmpty)
+        const _EmptyNote(
+            icon: Icons.menu_book_outlined, text: 'No loans recorded yet.')
+      else
+        Card(
+          elevation: 0,
+          color: Palette.card,
+          shape: _cardShape,
+          margin: EdgeInsets.zero,
+          child: Column(
+            children: [
+              for (var i = 0; i < recent.length; i++) ...[
+                if (i > 0)
+                  const Divider(height: 1, color: Color(0x2655161D)),
+                _ActivityRow(tx: recent[i]),
+              ],
+            ],
+          ),
+        ),
+    ];
+  }
+
+  void _goStat(String label) => setState(() {
+        switch (label) {
+          case 'Total Books':
+            _tab = 1;
+          case 'Available':
+            _tab = 1;
+            _sortKey = 'status';
+            _asc = true;
+            _catalogPage = 0;
+          case 'Students':
+            _tab = 2;
+            _borrowerView = 0;
+          case 'Borrowed':
+            _tab = 2;
+            _borrowerView = 1;
+            _txFilter = 'Not Returned';
+            _txPage = 0;
+          case 'Overdue':
+            _tab = 2;
+            _borrowerView = 1;
+            _txFilter = 'Overdue';
+            _txPage = 0;
+          default: // Fines Due
+            _tab = 2;
+            _borrowerView = 1;
+            _txFilter = 'All Statuses';
+            _txPage = 0;
+        }
+      });
+
+  List<(IconData, String, String, Color)> _notifications() {
+    const red = Color(0xFFC0121F);
+    final now = DateTime.now();
+    final out = <(IconData, String, String, Color)>[];
+    for (final t in _lib.transactions) {
+      final due = t.due;
+      if (t.overdue) {
+        out.add((
+          Icons.warning_amber_rounded,
+          'Overdue: ${t.title}',
+          '${t.borrower} · ${t.daysOverdue} ${t.daysOverdue == 1 ? 'day' : 'days'} late',
+          red
+        ));
+      } else if (!t.returned && due != null && due.difference(now).inDays < 2) {
+        out.add((
+          Icons.schedule,
+          'Due soon: ${t.title}',
+          '${t.borrower} · due ${_fmt(due)}',
+          Palette.amber
+        ));
+      }
+      if (t.returned && t.fine > 0 && !t.finePaid) {
+        out.add((
+          Icons.payments_outlined,
+          'Unpaid fine: ₱${t.fine.toStringAsFixed(2)}',
+          '${t.borrower} · ${t.title}',
+          red
+        ));
+      }
+    }
+    for (final b in _lib.books) {
+      if (_lib.copiesLeft(b) == 0) {
+        out.add((
+          Icons.inventory_2_outlined,
+          'No copies left: ${b.title}',
+          'All ${b.totalCopies} copies are borrowed.',
+          Palette.burgundy
+        ));
+      }
+    }
+    return out;
+  }
+
+  // Swap for the real field once AppUser has employeeId.
+  String _employeeId(AppUser? u) =>
+      (u?.employeeId.isNotEmpty ?? false) ? u!.employeeId : '-';
+
+  Widget _infoRow(IconData icon, String label, String value) => ListTile(
+        dense: true,
+        leading: Icon(icon, color: Palette.burgundy),
+        title: Text(label,
+            style: const TextStyle(fontSize: 12, color: Palette.textMuted)),
+        subtitle: Text(value.isEmpty ? '-' : value,
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Palette.textDark)),
+      );
+
+  List<Widget> _profileTab() {
+    final u = AuthService.instance.currentUser;
+    return [
+      const _Section('Librarian Profile', Icons.badge_outlined),
+      const SizedBox(height: 12),
+      Card(
+        elevation: 0,
+        color: Palette.card,
+        shape: _cardShape,
+        margin: EdgeInsets.zero,
+        child: Column(
+          children: [
+            _infoRow(Icons.person_outline, 'Full name', u?.fullName ?? ''),
+            _infoRow(Icons.numbers, 'Employee ID', _employeeId(u)),
+            _infoRow(Icons.email_outlined, 'Faculty email', u?.email ?? ''),
+            _infoRow(Icons.shield_outlined, 'Assigned role',
+                (u?.assignedRole.isNotEmpty ?? false) ? u!.assignedRole : 'Librarian'),
+          ],
+        ),
+      ),
+      const SizedBox(height: 24),
+      const _Section('Account Management', Icons.manage_accounts_outlined),
+      const SizedBox(height: 12),
+      Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _editProfile,
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: const Text('Edit profile'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _changePassword,
+              icon: const Icon(Icons.lock_reset, size: 18),
+              label: const Text('Password'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 24),
+      const _Section('Notifications', Icons.notifications_outlined),
+      const SizedBox(height: 12),
+      Card(
+        elevation: 0,
+        color: Palette.card,
+        shape: _cardShape,
+        margin: EdgeInsets.zero,
+        child: ListTile(
+          leading: Badge(
+            isLabelVisible: _notifications().isNotEmpty,
+            label: Text('${_notifications().length}'),
+            child: const Icon(Icons.notifications_outlined,
+                color: Palette.burgundy),
+          ),
+          title: const Text('Overdue, due soon, fines and stock alerts',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => _NotificationsScreen(source: _notifications),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 28),
+      OutlinedButton.icon(
+        onPressed: _confirmLogout,
+        icon: const Icon(Icons.logout, size: 18),
+        label: const Text('Log out'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFFE00000),
+          side: const BorderSide(color: Color(0xFFE00000)),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+        ),
+      ),
+    ];
+  }
+
+  Future<void> _editProfile() async {
+    final u = AuthService.instance.currentUser;
+    if (u == null) return;
+    final first = TextEditingController(text: u.firstName);
+    final last = TextEditingController(text: u.lastName);
+    final phone = TextEditingController(text: u.phone);
+    final key = GlobalKey<FormState>();
+    String? req(String? v) =>
+        (v == null || v.trim().isEmpty) ? 'Required' : null;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Edit Profile'),
+        content: SingleChildScrollView(
+          child: Form(
+            key: key,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                    controller: first,
+                    decoration: _fieldDec(label: 'First name'),
+                    validator: req),
+                const SizedBox(height: 12),
+                TextFormField(
+                    controller: last,
+                    decoration: _fieldDec(label: 'Last name'),
+                    validator: req),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: phone,
+                  keyboardType: TextInputType.phone,
+                  decoration: _fieldDec(label: 'Phone'),
+                  validator: Validators.phone,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (key.currentState!.validate()) Navigator.pop(c, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      final err = await AuthService.instance.updateProfile(
+        firstName: first.text.trim(),
+        lastName: last.text.trim(),
+        phone: phone.text.replaceAll(RegExp(r'[\s-]'), ''),
+      );
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(err ?? 'Profile updated.')));
+    }
+    first.dispose();
+    last.dispose();
+    phone.dispose();
+  }
+
+  Future<void> _changePassword() async {
+    final cur = TextEditingController();
+    final next = TextEditingController();
+    final conf = TextEditingController();
+    final key = GlobalKey<FormState>();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Change Password'),
+        content: SingleChildScrollView(
+          child: Form(
+            key: key,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: cur,
+                  obscureText: true,
+                  decoration: _fieldDec(label: 'Current password'),
+                  validator: (v) =>
+                      (v == null || v.isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: next,
+                  obscureText: true,
+                  decoration: _fieldDec(label: 'New password'),
+                  validator: (v) {
+                    final s = v ?? '';
+                    if (s.length < 8) return 'At least 8 characters';
+                    if (!RegExp(r'[A-Za-z]').hasMatch(s) ||
+                        !RegExp(r'[0-9]').hasMatch(s)) {
+                      return 'Use letters and numbers';
+                    }
+                    if (s == cur.text) return 'Must differ from current';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: conf,
+                  obscureText: true,
+                  decoration: _fieldDec(label: 'Confirm new password'),
+                  validator: (v) =>
+                      v == next.text ? null : 'Passwords don\'t match',
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (key.currentState!.validate()) Navigator.pop(c, true);
+            },
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      final err = await AuthService.instance.changePassword(cur.text, next.text);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(err ?? 'Password changed.')));
+    }
+    cur.dispose();
+    next.dispose();
+    conf.dispose();
+  }
+
   Widget _header() {
     final user = AuthService.instance.currentUser;
     final name = (user?.firstName.trim().isNotEmpty ?? false)
@@ -308,7 +843,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       value: SystemUiOverlayStyle.light,
       child: Container(
         padding: EdgeInsets.fromLTRB(
-            20, MediaQuery.of(context).padding.top + 16, 20, 20),
+            20, MediaQuery.of(context).padding.top + 20, 20, 24),
         decoration: const BoxDecoration(
           color: Palette.burgundy,
           borderRadius: BorderRadius.only(
@@ -326,7 +861,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                   Text('${_greeting()}, $name',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: text.headlineSmall?.copyWith(
+                      style: text.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                           color: Palette.creamLight)),
                   const SizedBox(height: 2),
@@ -336,29 +871,19 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                 ],
               ),
             ),
-            PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == 'profile') {
-                  Navigator.pushNamed(context, '/profile');
-                } else {
-                  _confirmLogout();
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'profile', child: Text('My Profile')),
-                PopupMenuItem(value: 'logout', child: Text('Logout')),
-              ],
-              child: CircleAvatar(
-                radius: 22,
-                backgroundColor: Palette.cream,
-                backgroundImage:
-                    user?.avatar != null ? MemoryImage(user!.avatar!) : null,
-                child: user?.avatar == null
-                    ? Text(user?.initial ?? '?',
-                        style: const TextStyle(
-                            color: Palette.burgundy,
-                            fontWeight: FontWeight.w700))
-                    : null,
+            IconButton(
+              tooltip: 'Notifications',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => _NotificationsScreen(source: _notifications),
+                ),
+              ),
+              icon: Badge(
+                isLabelVisible: _notifications().isNotEmpty,
+                label: Text('${_notifications().length}'),
+                child: const Icon(Icons.notifications_outlined,
+                    color: Palette.creamLight, size: 28),
               ),
             ),
           ],
@@ -400,7 +925,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
             (_txFilter == 'Overdue' ? t.overdue : t.status == _txFilter))
         .toList();
     final all = _lib.books;
-    final allStudents = AuthService.instance.students;
+    final allStudents = AuthService.instance.borrowers;
     final sq = _studentQuery.trim().toLowerCase();
     final foundStudents = allStudents
         .where((s) =>
@@ -415,7 +940,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           const Color(0xFFDEDAF4)),
       ('Overdue', '${_lib.transactions.where((t) => t.overdue).length}',
           const Color(0xFFFFADAD)),
-      ('Available', '${all.where((b) => _lib.isAvailable(b)).length}',
+      ('Available', '${all.fold<int>(0, (s, b) => s + _lib.copiesLeft(b))}',
           const Color(0xFFFFD6A5)),
       ('Students', '${allStudents.length}', const Color(0xFFD7ECFF)),
       ('Fines Due', '₱${_lib.outstandingFines.toStringAsFixed(0)}',
@@ -427,7 +952,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       backgroundColor: Palette.page,
       appBar: PreferredSize(
         preferredSize:
-            Size.fromHeight(112 + MediaQuery.of(context).padding.top),
+            Size.fromHeight(124 + MediaQuery.of(context).padding.top),
         child: _header(),
       ),
       bottomNavigationBar: _LibNavBar(
@@ -444,82 +969,33 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       ),
       body: ListView(
         key: ValueKey(_tab),
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 96),
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 96),
         children: [
-          if (_tab == 0) ...[
-          const _Section('Overview', Icons.auto_stories),
-          const SizedBox(height: 16),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 1.9,
-            children: [
-              for (final s in stats)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: s.$3,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Palette.burgundy.withAlpha(50)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(s.$1,
-                          style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600)),
-                      Text('${s.$2}',
-                          style: const TextStyle(
-                              fontSize: 28,
-                              fontFamily: 'Georgia',
-                              color: Palette.burgundy,
-                              fontWeight: FontWeight.w700)),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 28),
-
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: () => _openIssue(),
-              icon: const Icon(Icons.assignment_ind_outlined),
-              label: const Text('Issue Book to Student'),
-              style: FilledButton.styleFrom(
-                backgroundColor: Palette.burgundy,
-                foregroundColor: Palette.creamLight,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  side: const BorderSide(color: Palette.amber, width: 1.5),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          ],
+          if (_tab == 0) ..._overview(stats),
           if (_tab == 1) ...[
           // ---- Catalog ----
           const _Section('Book Catalog', Icons.menu_book),
           const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _openImport,
-              icon: const Icon(Icons.upload_file),
-              label: const Text('Bulk Import (CSV)'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Palette.burgundy,
-                side: const BorderSide(color: Palette.burgundy),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${books.length} ${books.length == 1 ? 'title' : 'titles'} in the catalog',
+                  style: const TextStyle(color: Palette.textMuted),
+                ),
               ),
-            ),
+              OutlinedButton.icon(
+                onPressed: _openImport,
+                icon: const Icon(Icons.upload_file, size: 18),
+                label: const Text('Bulk Import'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Palette.burgundy,
+                  side: const BorderSide(color: Palette.amber, width: 1.5),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           TextField(
@@ -527,12 +1003,9 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               _query = v;
               _catalogPage = 0;
             }),
-            decoration: const InputDecoration(
-              hintText: 'Search by title or author',
-              prefixIcon: Icon(Icons.search),
-              isDense: true,
-              border: OutlineInputBorder(),
-            ),
+            decoration: _fieldDec(
+                hint: 'Search by title or author',
+                prefix: const Icon(Icons.search)),
           ),
           const SizedBox(height: 10),
           Row(
@@ -541,10 +1014,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                 child: DropdownButtonFormField<String>(
                   value: _sortKey,
                   isExpanded: true,
-                  decoration: const InputDecoration(
-                      labelText: 'Sort by',
-                      isDense: true,
-                      border: OutlineInputBorder()),
+                  decoration: _fieldDec(label: 'Sort by'),
                   items: [
                     for (final e in _sortOptions.entries)
                       DropdownMenuItem(value: e.key, child: Text(e.value)),
@@ -600,20 +1070,37 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
 
           ],
           if (_tab == 2) ...[
+          const _Section('Borrowers', Icons.groups),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                    value: 0, icon: Icon(Icons.school), label: Text('Lookup')),
+                ButtonSegment(
+                    value: 1,
+                    icon: Icon(Icons.history_edu),
+                    label: Text('Transactions')),
+              ],
+              selected: {_borrowerView},
+              onSelectionChanged: (s) =>
+                  setState(() => _borrowerView = s.first),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ],
+          if (_tab == 2 && _borrowerView == 0) ...[
           // ---- Student lookup ----
-          const _Section('Student Lookup', Icons.school),
-          const SizedBox(height: 10),
           TextField(
             onChanged: (v) => setState(() {
               _studentQuery = v;
               _studentPage = 0;
             }),
-            decoration: const InputDecoration(
-              hintText: 'Search by name, email, or phone',
-              prefixIcon: Icon(Icons.person_search),
-              isDense: true,
-              border: OutlineInputBorder(),
-            ),
+            decoration: _fieldDec(
+                hint: 'Search by name, email, or phone',
+                prefix: const Icon(Icons.person_search)),
           ),
           const SizedBox(height: 12),
           if (foundStudents.isEmpty)
@@ -638,21 +1125,48 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           const SizedBox(height: 28),
 
           ],
-          if (_tab == 3) ...[
+          if (_tab == 2 && _borrowerView == 1) ...[
           // ---- Transactions ----
-          const _Section('Transaction History', Icons.history_edu),
-          const SizedBox(height: 10),
-          DropdownButtonFormField<String>(
-            value: _txFilter,
-            decoration: const InputDecoration(
-                isDense: true, border: OutlineInputBorder()),
-            items: const ['All Statuses', 'Not Returned', 'Overdue', 'Returned']
-                .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                .toList(),
-            onChanged: (v) => setState(() {
-              _txFilter = v ?? 'All Statuses';
-              _txPage = 0;
-            }),
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final f in const [
+                  'All Statuses', 'Not Returned', 'Overdue', 'Returned',
+                ])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(
+                          '${f == 'All Statuses' ? 'All' : f} (${_countFor(f)})'),
+                      selected: _txFilter == f,
+                      showCheckmark: false,
+                      backgroundColor: Palette.page,
+                      selectedColor: f == 'Overdue'
+                          ? const Color(0xFFC0121F)
+                          : Palette.burgundy,
+                      side: BorderSide(
+                          color: f == 'Overdue'
+                              ? const Color(0xFFC0121F)
+                              : Palette.burgundy,
+                          width: 1.2),
+                      labelStyle: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: _txFilter == f
+                            ? Colors.white
+                            : (f == 'Overdue'
+                                ? const Color(0xFFC0121F)
+                                : Palette.burgundy),
+                      ),
+                      onSelected: (_) => setState(() {
+                        _txFilter = f;
+                        _txPage = 0;
+                      }),
+                    ),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           if (tx.isEmpty)
@@ -679,7 +1193,91 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               ),
             ],
           ],
+          if (_tab == 3) ..._profileTab(),
         ],
+      ),
+    );
+  }
+}
+
+// ---------- Notifications screen ----------
+
+class _NotificationsScreen extends StatefulWidget {
+  const _NotificationsScreen({required this.source});
+  final List<(IconData, String, String, Color)> Function() source;
+
+  @override
+  State<_NotificationsScreen> createState() => _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends State<_NotificationsScreen> {
+  static const _size = 6;
+  int _page = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Palette.page,
+      appBar: AppBar(
+        backgroundColor: Palette.burgundy,
+        foregroundColor: Palette.creamLight,
+        title: const Text('Notifications',
+            style: TextStyle(
+                fontFamily: 'Georgia', fontWeight: FontWeight.w700)),
+      ),
+      body: ListenableBuilder(
+        listenable: LibraryService.instance,
+        builder: (context, _) {
+          final notes = widget.source();
+          final pages = (notes.length / _size).ceil();
+          final page = pages <= 1 ? 0 : _page.clamp(0, pages - 1);
+          final start = page * _size;
+          final end = (start + _size).clamp(0, notes.length);
+
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+            children: [
+              Text(
+                notes.isEmpty
+                    ? 'Nothing needs your attention.'
+                    : '${notes.length} ${notes.length == 1 ? 'notification' : 'notifications'}',
+                style: const TextStyle(color: Palette.textMuted),
+              ),
+              const SizedBox(height: 14),
+              if (notes.isEmpty)
+                const _EmptyNote(
+                    icon: Icons.verified_outlined,
+                    text: 'You\'re all caught up.')
+              else ...[
+                for (final n in notes.sublist(start, end))
+                  Card(
+                    elevation: 0,
+                    color: Palette.card,
+                    shape: _cardShape,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      leading: CircleAvatar(
+                        backgroundColor: n.$4.withAlpha(30),
+                        child: Icon(n.$1, color: n.$4, size: 20),
+                      ),
+                      title: Text(n.$2,
+                          style:
+                              const TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: Text(n.$3),
+                    ),
+                  ),
+                _Pager(
+                  page: page,
+                  total: notes.length,
+                  pageSize: _size,
+                  onChanged: (p) => setState(() => _page = p),
+                ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -801,6 +1399,8 @@ class _CatalogCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(book.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           fontWeight: FontWeight.w700, fontSize: 15)),
                   Text(book.author,
@@ -842,10 +1442,12 @@ class _CatalogCard extends StatelessWidget {
               children: [
                 IconButton(
                     tooltip: 'Edit ${book.title}',
+                    visualDensity: VisualDensity.compact,
                     onPressed: onEdit,
                     icon: const Icon(Icons.edit_outlined)),
                 IconButton(
                     tooltip: 'Delete ${book.title}',
+                    visualDensity: VisualDensity.compact,
                     onPressed: onDelete,
                     color: const Color(0xFFC0121F),
                     icon: const Icon(Icons.delete_outline)),
@@ -876,6 +1478,11 @@ class _TxCard extends StatelessWidget {
     return Card(
       elevation: 0,
       color: Palette.card,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+            color: t.overdue ? red.withAlpha(150) : const Color(0x2655161D)),
+      ),
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -1044,9 +1651,16 @@ class _StudentCard extends StatelessWidget {
     return Card(
       elevation: 0,
       color: Palette.card,
+      shape: _cardShape,
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
         onTap: onTap,
+        leading: CircleAvatar(
+          backgroundColor: Palette.burgundy,
+          child: Text(student.initial,
+              style: const TextStyle(
+                  color: Palette.creamLight, fontWeight: FontWeight.w700)),
+        ),
         title: Text(student.fullName,
             style: const TextStyle(fontWeight: FontWeight.w700)),
         subtitle: Text('${student.email}\n${student.phone}'),
@@ -1130,6 +1744,10 @@ class _StudentSheet extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: 8),
+              Text(
+                  'Borrowing limit: ${lib.activeLoansOf(email).length}/${LibraryService.maxActiveLoans} books',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
               if (fines > 0) ...[
                 const SizedBox(height: 8),
                 Text('Outstanding fines: ₱${fines.toStringAsFixed(2)}',
@@ -1196,7 +1814,7 @@ class _IssueSheetState extends State<_IssueSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final students = AuthService.instance.students;
+    final students = AuthService.instance.borrowers;
     final student = _email == null ? null : _lib.studentByEmail(_email!);
     final book = _book;
     final problem =
@@ -1259,6 +1877,12 @@ class _IssueSheetState extends State<_IssueSheet> {
               onChanged: (v) => setState(() => _bookId = v),
             ),
             const SizedBox(height: 14),
+            if (student != null) ...[
+              Text(
+                  'Borrowing limit: ${_lib.activeLoansOf(student.email).length}/${LibraryService.maxActiveLoans} books',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+            ],
             if (problem != null)
               Text(problem,
                   style: const TextStyle(
@@ -1378,6 +2002,16 @@ class _BookFormState extends State<_BookForm> {
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
+    final total = int.parse(_copies.text.trim());
+    final borrowed =
+        _editing ? LibraryService.instance.activeFor(widget.book!) : 0;
+    if (total < borrowed) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            '$borrowed copies are currently borrowed. Total copies can\'t be lower than that.'),
+      ));
+      return;
+    }
     final base = widget.book ??
         Book(title: '', author: '', category: '', color: Palette.burgundy);
     Navigator.pop(
@@ -1388,8 +2022,8 @@ class _BookFormState extends State<_BookForm> {
         publisher: _publisher.text.trim(),
         category: _category,
         published: _published,
-        totalCopies: int.parse(_copies.text.trim()),
-        copiesAvailable: int.parse(_copies.text.trim()),
+        totalCopies: total,
+        copiesAvailable: total,
         description: _desc.text.trim(),
         imageUrl: _bytes != null ? '' : _image.text.trim(),
         imageBytes: _bytes,
@@ -1398,12 +2032,8 @@ class _BookFormState extends State<_BookForm> {
     );
   }
 
-  InputDecoration _dec(String label, {String? hint}) => InputDecoration(
-        labelText: label,
-        hintText: hint,
-        isDense: true,
-        border: const OutlineInputBorder(),
-      );
+  InputDecoration _dec(String label, {String? hint}) =>
+      _fieldDec(label: label, hint: hint);
 
   @override
   Widget build(BuildContext context) {
@@ -1411,28 +2041,24 @@ class _BookFormState extends State<_BookForm> {
     final previewUrl =
         Validators.imageUrl(_image.text) == null ? _image.text.trim() : '';
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+    return Scaffold(
+      backgroundColor: Palette.page,
+      appBar: AppBar(
+        backgroundColor: Palette.burgundy,
+        foregroundColor: Palette.creamLight,
+        title: Text(_editing ? 'Edit Book' : 'Add Book',
+            style: const TextStyle(
+                fontFamily: 'Georgia', fontWeight: FontWeight.w700)),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
         child: Form(
           key: _formKey,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(_editing ? 'Edit Book' : 'Add Book',
-                        style: const TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w700)),
-                  ),
-                  IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close)),
-                ],
-              ),
-              const SizedBox(height: 12),
+              const _Section('Details', Icons.edit_note),
+              const SizedBox(height: 14),
               TextFormField(
                 controller: _title,
                 decoration: _dec('Book Title', hint: 'Enter a Book Title'),
@@ -1456,6 +2082,9 @@ class _BookFormState extends State<_BookForm> {
                 autovalidateMode: auto,
                 textInputAction: TextInputAction.next,
               ),
+              const SizedBox(height: 14),
+              const SizedBox(height: 10),
+              const _Section('Publication', Icons.event),
               const SizedBox(height: 14),
               DropdownButtonFormField<String>(
                 value: _category,
@@ -1487,6 +2116,9 @@ class _BookFormState extends State<_BookForm> {
                 autovalidateMode: auto,
               ),
               const SizedBox(height: 14),
+              const SizedBox(height: 10),
+              const _Section('Description', Icons.notes),
+              const SizedBox(height: 14),
               TextFormField(
                 controller: _desc,
                 maxLines: 4,
@@ -1496,7 +2128,9 @@ class _BookFormState extends State<_BookForm> {
                 validator: Validators.description,
                 autovalidateMode: auto,
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 10),
+              const _Section('Cover', Icons.image_outlined),
+              const SizedBox(height: 14),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2413,6 +3047,169 @@ class _ResultTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------- Desk widgets ----------
+
+class _QuickAction extends StatelessWidget {
+  const _QuickAction(
+      {required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: Palette.burgundy,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Palette.amber, width: 1.2),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: Palette.cream, size: 24),
+            const SizedBox(height: 6),
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Palette.creamLight,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatTile extends StatelessWidget {
+  const _StatTile({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.icon,
+  });
+  final String label;
+  final String value;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Palette.burgundy.withAlpha(50)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+                color: Colors.white.withAlpha(150), shape: BoxShape.circle),
+            child: Icon(icon, color: Palette.burgundy, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(value,
+                      style: const TextStyle(
+                          fontFamily: 'Georgia',
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: Palette.burgundy)),
+                ),
+                Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyNote extends StatelessWidget {
+  const _EmptyNote({required this.icon, required this.text});
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Palette.cream.withAlpha(110),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Palette.burgundy.withAlpha(50)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: const Color(0xFF0C7A43)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(text,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActivityRow extends StatelessWidget {
+  const _ActivityRow({required this.tx});
+  final BookTransaction tx;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tx;
+    final color = t.overdue
+        ? const Color(0xFFC0121F)
+        : t.returned
+            ? const Color(0xFF0C7A43)
+            : Palette.amber;
+    return ListTile(
+      dense: true,
+      leading: CircleAvatar(
+        radius: 18,
+        backgroundColor: color.withAlpha(30),
+        child: Icon(
+          t.returned ? Icons.assignment_return_outlined : Icons.north_east,
+          size: 18,
+          color: color,
+        ),
+      ),
+      title: Text(t.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: Text(
+        '${t.borrower} · ${t.returned ? 'Returned ${_fmt(t.returnedOn)}' : 'Borrowed ${_fmt(t.borrowedOn)}'}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }

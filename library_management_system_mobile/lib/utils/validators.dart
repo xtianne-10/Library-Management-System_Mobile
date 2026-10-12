@@ -3,6 +3,10 @@ final _phoneRe = RegExp(r'^(09\d{9}|\+639\d{9})$');
 final _nameRe = RegExp(r"^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .'-]*$");
 final _idRe = RegExp(r'^[A-Za-z0-9][A-Za-z0-9-]*$');
 
+const yearLevelOptions = [
+  '1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year',
+];
+
 class Validators {
   static String? name(String? v, String label) {
     final s = (v ?? '').trim();

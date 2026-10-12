@@ -60,7 +60,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       firstName: _first.text.trim(),
       lastName: _last.text.trim(),
       email: _email.text.trim(),
-      phone: _phone.text.trim(),
+      phone: _phone.text.replaceAll(RegExp(r'[\s-]'), ''),
       password: _password.text,
       role: role,
       idNumber: _id.text.trim(),
@@ -110,7 +110,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
           onTap: () => setState(() => _role = role),
           borderRadius: BorderRadius.circular(10),
           child: Container(
-            width: 112,
             height: 112,
             decoration: BoxDecoration(
               color: Palette.cream,
@@ -123,7 +122,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 8),
                 Text(label,
                     style: const TextStyle(
-                        fontSize: 17, color: Palette.burgundy)),
+                        fontSize: 15, color: Palette.burgundy)),
               ],
             ),
           ),
@@ -139,13 +138,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
         const SizedBox(height: 28),
         const Text('I am a:', style: TextStyle(fontSize: 18, color: _fg)),
         const SizedBox(height: 14),
-        Wrap(
-          spacing: 16,
-          runSpacing: 16,
+        Row(
           children: [
-            card(UserRole.student, 'Student', Icons.school),
-            card(UserRole.professor, 'Professor', Icons.person_pin),
-            card(UserRole.librarian, 'Librarian', Icons.local_library),
+            Expanded(child: card(UserRole.student, 'Student', Icons.school)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: card(UserRole.professor, 'Professor',
+                    Icons.cast_for_education)),
           ],
         ),
       ],
