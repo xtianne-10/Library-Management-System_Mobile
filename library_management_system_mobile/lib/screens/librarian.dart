@@ -369,7 +369,6 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   }
 
   List<Widget> _overview(List<(String, String, Color)> stats) {
-    final overdue = _lib.transactions.where((t) => t.overdue).toList();
     final recent = _lib.transactions.take(5).toList();
     final now = DateTime.now();
     bool isToday(DateTime? d) =>
@@ -465,32 +464,6 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           ),
         ],
       ),
-      const SizedBox(height: 28),
-
-      // Needs attention
-      const _Section('Needs Attention', Icons.notification_important_outlined),
-      const SizedBox(height: 12),
-      if (overdue.isEmpty)
-        const _EmptyNote(
-            icon: Icons.verified_outlined,
-            text: 'All quiet. No overdue books.')
-      else ...[
-        for (final t in overdue.take(3))
-          _TxCard(tx: t, onReturn: () => _returnTx(t)),
-        if (overdue.length > 3)
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: () => setState(() {
-                _tab = 2;
-                _borrowerView = 1;
-                _txFilter = 'Overdue';
-                _txPage = 0;
-              }),
-              child: Text('View all ${overdue.length} overdue'),
-            ),
-          ),
-      ],
       const SizedBox(height: 28),
 
       // Recent activity
@@ -610,8 +583,64 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   List<Widget> _profileTab() {
     final u = AuthService.instance.currentUser;
     return [
-      const _Section('Librarian Profile', Icons.badge_outlined),
-      const SizedBox(height: 12),
+      Center(
+        child: Column(
+          children: [
+            GestureDetector(
+              onTap: _changePhoto,
+              child: Stack(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                        shape: BoxShape.circle, color: Palette.burgundy),
+                    child: CircleAvatar(
+                      radius: 52,
+                      backgroundColor: Palette.creamLight,
+                      backgroundImage:
+                          u?.avatar != null ? MemoryImage(u!.avatar!) : null,
+                      child: u?.avatar == null
+                          ? Text(u?.initial ?? '?',
+                              style: const TextStyle(
+                                  fontSize: 44,
+                                  color: Palette.burgundy,
+                                  fontWeight: FontWeight.w700))
+                          : null,
+                    ),
+                  ),
+                  const Positioned(
+                    right: 2,
+                    bottom: 2,
+                    child: CircleAvatar(
+                      radius: 17,
+                      backgroundColor: Palette.amber,
+                      child: Icon(Icons.camera_alt,
+                          size: 17, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(u?.fullName ?? '',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700, color: Palette.burgundy)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+              decoration: BoxDecoration(
+                color: Palette.burgundy.withAlpha(25),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Text('Librarian',
+                  style: TextStyle(
+                      color: Palette.burgundy, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 24),
       Card(
         elevation: 0,
         color: Palette.card,
@@ -628,15 +657,19 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         ),
       ),
       const SizedBox(height: 24),
-      const _Section('Account Management', Icons.manage_accounts_outlined),
-      const SizedBox(height: 12),
+      const SizedBox(height: 16),
       Row(
         children: [
           Expanded(
-            child: OutlinedButton.icon(
+            child: FilledButton.icon(
               onPressed: _editProfile,
               icon: const Icon(Icons.edit_outlined, size: 18),
               label: const Text('Edit profile'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Palette.burgundy,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
             ),
           ),
           const SizedBox(width: 10),
@@ -649,33 +682,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           ),
         ],
       ),
-      const SizedBox(height: 24),
-      const _Section('Notifications', Icons.notifications_outlined),
       const SizedBox(height: 12),
-      Card(
-        elevation: 0,
-        color: Palette.card,
-        shape: _cardShape,
-        margin: EdgeInsets.zero,
-        child: ListTile(
-          leading: Badge(
-            isLabelVisible: _notifications().isNotEmpty,
-            label: Text('${_notifications().length}'),
-            child: const Icon(Icons.notifications_outlined,
-                color: Palette.burgundy),
-          ),
-          title: const Text('Overdue, due soon, fines and stock alerts',
-              style: TextStyle(fontWeight: FontWeight.w600)),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => _NotificationsScreen(source: _notifications),
-            ),
-          ),
-        ),
-      ),
-      const SizedBox(height: 28),
       OutlinedButton.icon(
         onPressed: _confirmLogout,
         icon: const Icon(Icons.logout, size: 18),
@@ -687,6 +694,71 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         ),
       ),
     ];
+  }
+
+  void _snack(String msg) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  Future<void> _pickPhoto(ImageSource source) async {
+    try {
+      final file = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 800,
+        imageQuality: 85,
+      );
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      AuthService.instance.updateAvatar(bytes);
+      setState(() {});
+      _snack('Profile picture updated.');
+    } catch (_) {
+      if (!mounted) return;
+      _snack('Could not open the camera or gallery.');
+    }
+  }
+
+  void _changePhoto() {
+    final hasPhoto = AuthService.instance.currentUser?.avatar != null;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take a photo'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _pickPhoto(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _pickPhoto(ImageSource.gallery);
+              },
+            ),
+            if (hasPhoto)
+              ListTile(
+                leading: Icon(Icons.delete_outline, color: Colors.red.shade700),
+                title: Text('Remove photo',
+                    style: TextStyle(color: Colors.red.shade700)),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  AuthService.instance.updateAvatar(null);
+                  setState(() {});
+                  _snack('Profile picture removed.');
+                },
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _editProfile() async {
@@ -843,7 +915,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       value: SystemUiOverlayStyle.light,
       child: Container(
         padding: EdgeInsets.fromLTRB(
-            20, MediaQuery.of(context).padding.top + 20, 20, 24),
+            20, MediaQuery.of(context).padding.top + 10, 20, 16),
         decoration: const BoxDecoration(
           color: Palette.burgundy,
           borderRadius: BorderRadius.only(
@@ -952,7 +1024,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       backgroundColor: Palette.page,
       appBar: PreferredSize(
         preferredSize:
-            Size.fromHeight(124 + MediaQuery.of(context).padding.top),
+            Size.fromHeight(82 + MediaQuery.of(context).padding.top),
         child: _header(),
       ),
       bottomNavigationBar: _LibNavBar(
