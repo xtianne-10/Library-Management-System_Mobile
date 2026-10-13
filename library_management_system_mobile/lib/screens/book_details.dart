@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/models/book.dart';
-import 'package:library_management_system_mobile/globes/borrow_store.dart';
+import 'package:library_management_system_mobile/services/auth_service.dart';
+import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/globes/favorites_store.dart';
 
 void openBookDetails(BuildContext context, Book book) {
@@ -37,18 +38,21 @@ class BookDetailsScreen extends StatelessWidget {
       ));
   }
 
-  void _onBorrowPressed(BuildContext context, {required bool isAvail}) {
+    Future<void> _onBorrowPressed(BuildContext context,
+      {required bool isAvail}) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
 
     if (!isAvail) {
       messenger.showSnackBar(SnackBar(
-        content: Text('You\'re on the waitlist for "${book.title}".'),
+        content: Text('All copies of "${book.title}" are on loan right now.'),
       ));
       return;
     }
 
-    final error = BorrowStore.instance.requestBorrow(book);
+    final me = AuthService.instance.currentUser;
+    if (me == null) return;
+    final error = await LibraryService.instance.requestBorrow(book, me);
     messenger.showSnackBar(SnackBar(
       content: Text(error ??
           'Request sent for "${book.title}". Waiting for librarian approval.'),
@@ -69,25 +73,32 @@ class BookDetailsScreen extends StatelessWidget {
       value: SystemUiOverlayStyle.light,
       child: ListenableBuilder(
         listenable: Listenable.merge([
-          BorrowStore.instance,
+          LibraryService.instance,
           FavoritesStore.instance,
         ]),
         builder: (context, _) {
           final isFav = FavoritesStore.instance.isFavorite(book);
-          final store = BorrowStore.instance;
+          final store = LibraryService.instance;
+          final email = AuthService.instance.currentUser?.email ?? '';
           final left = store.copiesLeft(book);
           final isAvail = left > 0;
-          final loan = store.loanOf(book);
-          final pending = store.isPending(book);
-          final declined = store.isDeclined(book);
+          final loan = store
+              .activeLoansOf(email)
+              .where((t) => t.bookId == book.id)
+              .firstOrNull;
+          final pending = store.hasPendingFor(book, email);
+          final declined = store.wasDeclinedFor(book, email);
 
           // Button text and action for the current state
           String buttonLabel;
           VoidCallback? buttonAction;
 
           if (loan != null) {
-            final d = loan.daysLeft;
-            buttonLabel = loan.isOverdue
+            final now = DateTime.now();
+            final d = DateTime(loan.due.year, loan.due.month, loan.due.day)
+                .difference(DateTime(now.year, now.month, now.day))
+                .inDays;
+            buttonLabel = loan.overdue
                 ? 'Borrowed - Overdue by ${loan.daysOverdue} ${loan.daysOverdue == 1 ? 'day' : 'days'}'
                 : d == 0
                     ? 'Borrowed - Due today'
@@ -103,8 +114,8 @@ class BookDetailsScreen extends StatelessWidget {
             buttonLabel = 'Request to borrow';
             buttonAction = () => _onBorrowPressed(context, isAvail: isAvail);
           } else {
-            buttonLabel = 'Join waitlist';
-            buttonAction = () => _onBorrowPressed(context, isAvail: isAvail);
+            buttonLabel = 'Currently on loan';
+            buttonAction = null;
           }
 
           return Scaffold(
@@ -293,7 +304,7 @@ class BookDetailsScreen extends StatelessWidget {
                               child: Text(
                                 isAvail
                                     ? 'Available now: $left of ${book.totalCopies} copies on the shelf'
-                                    : 'All copies are on loan. Join the waitlist to be next.',
+                                    : 'All copies are on loan right now. Check back soon.',
                                 style: text.bodyMedium?.copyWith(
                                   color: Palette.textDark,
                                   fontWeight: FontWeight.w600,

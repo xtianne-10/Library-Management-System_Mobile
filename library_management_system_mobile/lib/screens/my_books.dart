@@ -5,6 +5,7 @@ import 'package:library_management_system_mobile/app_nav_bar.dart';
 import 'package:library_management_system_mobile/globes/borrow_store.dart';
 import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/screens/book_details.dart';
+import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 
 enum _Filter {
@@ -33,6 +34,12 @@ class MyBooksScreen extends StatefulWidget {
 class _MyBooksScreenState extends State<MyBooksScreen> {
   _Filter _filter = _Filter.current;
   bool _argsRead = false;
+
+  @override
+  void initState() {
+    super.initState();
+    LibraryService.instance.reload();
+  }
 
   @override
   void didChangeDependencies() {
@@ -375,13 +382,15 @@ class _RequestCard extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: FilledButton(
-                    onPressed: () {
-                      BorrowStore.instance.cancelRequest(request);
-                      ScaffoldMessenger.of(context)
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      final err =
+                          await BorrowStore.instance.cancelRequest(request);
+                      messenger
                         ..hideCurrentSnackBar()
                         ..showSnackBar(SnackBar(
-                          content:
-                              Text('Request cancelled for "${book.title}".'),
+                          content: Text(err ??
+                              'Request cancelled for "${book.title}".'),
                         ));
                     },
                     style: FilledButton.styleFrom(

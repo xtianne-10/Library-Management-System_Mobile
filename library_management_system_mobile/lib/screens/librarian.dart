@@ -415,6 +415,23 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       ),
       const SizedBox(height: 24),
 
+      // Borrow requests waiting for approval
+      if (_lib.pendingRequests.isNotEmpty) ...[
+        _Section('Borrow Requests (${_lib.pendingRequests.length})',
+            Icons.how_to_reg),
+        const SizedBox(height: 12),
+        for (final r in _lib.pendingRequests.take(5))
+          _RequestCard(
+            request: r,
+            onApprove: () => _decide(r, true),
+            onDecline: () => _decide(r, false),
+          ),
+        if (_lib.pendingRequests.length > 5)
+          Text('+ ${_lib.pendingRequests.length - 5} more waiting',
+              style: const TextStyle(color: Palette.textMuted)),
+        const SizedBox(height: 16),
+      ],
+
       // Stats
       const _Section('Library at a Glance', Icons.auto_stories),
       const SizedBox(height: 14),
@@ -548,6 +565,14 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           red
         ));
       }
+    }
+    for (final r in _lib.pendingRequests) {
+      out.add((
+        Icons.how_to_reg,
+        'Borrow request: ${r.book.title}',
+        '${r.borrower} is waiting for approval.',
+        Palette.amber
+      ));
     }
     for (final b in _lib.books) {
       if (_lib.copiesLeft(b) == 0) {
@@ -964,6 +989,17 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _decide(LoanRequest r, bool approve) async {
+    final err = approve
+        ? await _lib.approveRequest(r.id)
+        : await _lib.declineRequest(r.id);
+    if (!mounted) return;
+    _snack(err ??
+        (approve
+            ? 'Approved "${r.book.title}" for ${r.borrower}.'
+            : 'Declined the request for "${r.book.title}".'));
   }
 
   Future<void> _returnTx(BookTransaction t) async {
@@ -3300,6 +3336,73 @@ class _ActivityRow extends StatelessWidget {
         '${t.borrower} · ${t.returned ? 'Returned ${_fmt(t.returnedOn)}' : 'Borrowed ${_fmt(t.borrowedOn)}'}',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+}
+
+
+class _RequestCard extends StatelessWidget {
+  const _RequestCard({
+    required this.request,
+    required this.onApprove,
+    required this.onDecline,
+  });
+  final LoanRequest request;
+  final VoidCallback onApprove;
+  final VoidCallback onDecline;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = request;
+    return Card(
+      elevation: 0,
+      color: Palette.card,
+      shape: _cardShape,
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(r.book.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 2),
+            Text('${r.borrower} (${r.borrowerEmail})',
+                style: const TextStyle(fontSize: 13)),
+            Text('Requested ${_fmt(r.requestedOn)}',
+                style:
+                    const TextStyle(fontSize: 12, color: Palette.textMuted)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: onDecline,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFC0121F),
+                      side: const BorderSide(color: Color(0xFFC0121F)),
+                    ),
+                    child: const Text('Decline'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: onApprove,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Palette.burgundy,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Approve'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

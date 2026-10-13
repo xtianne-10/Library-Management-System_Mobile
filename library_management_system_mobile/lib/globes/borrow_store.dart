@@ -94,21 +94,24 @@ class BorrowStore extends ChangeNotifier {
     return list;
   }
 
-  // Borrow requests (need librarian approval)
+    // Borrow requests (need librarian approval). The server keeps them and
+  // LibraryService loads them.
 
-  final List<BorrowRequest> _requests = [];
-  int _nextRequestId = 1;
+  BorrowRequest _asRequest(LoanRequest r) => BorrowRequest(
+        id: r.id,
+        book: r.book,
+        user: null,
+        email: r.borrowerEmail,
+        requestedOn: r.requestedOn,
+      );
 
-  BorrowRequest? _requestFor(Book b) {
-    final email = AuthService.instance.currentUser?.email;
-    for (final r in _requests.reversed) {
-      if (r.email == email && r.book.id == b.id) return r;
-    }
-    return null;
-  }
+  String get _myEmail => AuthService.instance.currentUser?.email ?? '';
 
-  bool isPending(Book b) => _requestFor(b)?.status == RequestStatus.pending;
-  bool isDeclined(Book b) => _requestFor(b)?.status == RequestStatus.declined;
+  bool isPending(Book b) =>
+      LibraryService.instance.hasPendingFor(b, _myEmail);
+
+  bool isDeclined(Book b) =>
+      LibraryService.instance.wasDeclinedFor(b, _myEmail);
 
   // The borrower's active loan for this book, or null
   BorrowedBook? loanOf(Book b) {
@@ -118,58 +121,24 @@ class BorrowStore extends ChangeNotifier {
     return null;
   }
 
-  // Borrower: ask to borrow; Returns an error message, or null if sent
-  String? requestBorrow(Book b) {
+  // Borrower: ask to borrow. Returns an error message, or null if sent
+  Future<String?> requestBorrow(Book b) async {
     final user = AuthService.instance.currentUser;
     if (user == null) return 'Please sign in first.';
     if (isBorrowed(b)) return 'You already borrowed this book.';
-    if (isPending(b)) return 'You already requested this book.';
-
-    // Clears an older declined request for the same book
-    _requests.removeWhere((r) => r.email == user.email && r.book.id == b.id);
-    _requests.add(BorrowRequest(
-      id: _nextRequestId++,
-      book: b,
-      user: user,
-      email: user.email,
-      requestedOn: DateTime.now(),
-    ));
-    notifyListeners();
-    return null;
+    return LibraryService.instance.requestBorrow(b, user);
   }
 
   // Borrower: this borrower's requests that are still waiting
-  List<BorrowRequest> get myPendingRequests {
-    final email = AuthService.instance.currentUser?.email;
-    return _requests
-        .where((r) => r.email == email && r.status == RequestStatus.pending)
-        .toList();
-  }
+  List<BorrowRequest> get myPendingRequests => LibraryService.instance
+      .requestsOf(_myEmail)
+      .where((r) => !r.declined)
+      .map(_asRequest)
+      .toList();
 
-  // Borrower: withdraw a pending request
-  void cancelRequest(BorrowRequest r) {
-    _requests.remove(r);
-    notifyListeners();
-  }
-
-  // Librarian: all requests still waiting
-  List<BorrowRequest> get pendingRequests =>
-      _requests.where((r) => r.status == RequestStatus.pending).toList();
-
-  // Librarian: approve. Returns an error message (request stays pending)
-  // or null on success
-  Future<String?> approve(BorrowRequest r) async {
-    final error = await LibraryService.instance.checkOut(r.book, r.user);
-    if (error != null) return error;
-    _requests.remove(r);
-    notifyListeners();
-    return null;
-  }
-
-  void decline(BorrowRequest r) {
-    r.status = RequestStatus.declined;
-    notifyListeners();
-  }
+  // Borrower: withdraw a pending request. Returns an error message, or null
+  Future<String?> cancelRequest(BorrowRequest r) =>
+      LibraryService.instance.cancelRequest(r.id);
 
   bool isBorrowed(Book b) => _all.any((e) => !e.isReturned && e.book.id == b.id);
 

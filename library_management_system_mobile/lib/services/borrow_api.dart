@@ -39,4 +39,14 @@ class BorrowApi {
 
   static Future<void> payFine(String id) async =>
       _decode(await http.put(_uri('/$id/pay'), headers: _headers));
+
+  // Borrow requests: librarians approve or decline, borrowers can cancel their own
+  static Future<void> approve(String id) async =>
+      _decode(await http.put(_uri('/$id/approve'), headers: _headers));
+
+  static Future<void> decline(String id) async =>
+      _decode(await http.put(_uri('/$id/decline'), headers: _headers));
+
+  static Future<void> cancel(String id) async =>
+      _decode(await http.put(_uri('/$id/cancel'), headers: _headers));
 }

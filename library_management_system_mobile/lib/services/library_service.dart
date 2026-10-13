@@ -73,6 +73,27 @@ class BookTransaction {
   BookTransaction markFinePaid() => _copy(finePaid: true);
 }
 
+/// A borrow request waiting for (or turned down by) a librarian.
+class LoanRequest {
+  const LoanRequest({
+    required this.id,
+    required this.remoteId,
+    required this.book,
+    required this.borrower,
+    required this.borrowerEmail,
+    required this.requestedOn,
+    required this.declined,
+  });
+
+  final int id;
+  final String remoteId;
+  final Book book;
+  final String borrower;
+  final String borrowerEmail;
+  final DateTime requestedOn;
+  final bool declined;
+}
+
 /// Shared in-memory catalog + transactions (single source of truth).
 class LibraryService extends ChangeNotifier {
   LibraryService._();
@@ -84,11 +105,30 @@ class LibraryService extends ChangeNotifier {
 
   final List<Book> _books = [];
   final List<BookTransaction> _transactions = []; // newest first
+  final List<LoanRequest> _requests = []; // oldest first
   int _nextTxId = 1;
   bool _loaded = false;
 
   List<Book> get books => List.unmodifiable(_books);
   List<BookTransaction> get transactions => List.unmodifiable(_transactions);
+
+  /// Requests still waiting for a librarian (librarians see everyone's).
+  List<LoanRequest> get pendingRequests =>
+      _requests.where((r) => !r.declined).toList();
+
+  List<LoanRequest> requestsOf(String email) {
+    final e = email.trim().toLowerCase();
+    return _requests.where((r) => r.borrowerEmail == e).toList();
+  }
+
+  bool hasPendingFor(Book b, String email) =>
+      requestsOf(email).any((r) => !r.declined && r.book.id == b.id);
+
+  // Turned down and not asked again since
+  bool wasDeclinedFor(Book b, String email) {
+    final mine = requestsOf(email).where((r) => r.book.id == b.id).toList();
+    return mine.isNotEmpty && !mine.any((r) => !r.declined);
+  }
 
   final Map<String, int> _idMap = {}; // server id -> stable local int id
   int _nextLocalId = 1;
@@ -130,10 +170,30 @@ class LibraryService extends ChangeNotifier {
       final rows = await BorrowApi.list();
       final byRemote = {for (final b in _books) b.remoteId: b};
       final out = <BookTransaction>[];
+      final reqs = <LoanRequest>[];
       for (final r in rows) {
         final book = byRemote[(r['bookId'] ?? '').toString()];
         if (book == null) continue;
         final rid = (r['id'] ?? '').toString();
+
+        // Requests aren't loans yet: they have no borrow or due date
+        final state = (r['requestStatus'] ?? 'approved').toString();
+        if (state == 'cancelled') continue;
+        if (state == 'pending' || state == 'declined') {
+          reqs.add(LoanRequest(
+            id: _txIdFor(rid),
+            remoteId: rid,
+            book: book,
+            borrower: (r['borrower'] ?? '') as String,
+            borrowerEmail:
+                ((r['borrowerEmail'] ?? '') as String).toLowerCase(),
+            requestedOn:
+                DateTime.tryParse((r['requestedOn'] ?? '').toString()) ??
+                    DateTime.now(),
+            declined: state == 'declined',
+          ));
+          continue;
+        }
         out.add(BookTransaction(
           id: _txIdFor(rid),
           remoteId: rid,
@@ -153,6 +213,9 @@ class LibraryService extends ChangeNotifier {
       _transactions
         ..clear()
         ..addAll(out);
+      _requests
+        ..clear()
+        ..addAll(reqs..sort((a, b) => a.requestedOn.compareTo(b.requestedOn)));
       if (AuthService.instance.currentUser?.role == UserRole.librarian) {
         await AuthService.instance.loadBorrowers();
       }
@@ -286,6 +349,34 @@ class LibraryService extends ChangeNotifier {
     await reload();
     return null;
   }
+
+  /// Student/professor asks for a book. Returns an error message, or null on success.
+  Future<String?> requestBorrow(Book b, AppUser me) async {
+    if (hasPendingFor(b, me.email)) return 'You already requested this book.';
+    try {
+      await BorrowApi.issue(b.remoteId, me.email);
+    } catch (e) {
+      return _msg(e);
+    }
+    await reload();
+    return null;
+  }
+
+  Future<String?> _answer(int id, Future<void> Function(String) call) async {
+    final i = _requests.indexWhere((r) => r.id == id);
+    if (i == -1) return 'Request not found.';
+    try {
+      await call(_requests[i].remoteId);
+    } catch (e) {
+      return _msg(e);
+    }
+    await reload();
+    return null;
+  }
+
+  Future<String?> approveRequest(int id) => _answer(id, BorrowApi.approve);
+  Future<String?> declineRequest(int id) => _answer(id, BorrowApi.decline);
+  Future<String?> cancelRequest(int id) => _answer(id, BorrowApi.cancel);
 
   Future<String?> returnBook(int id) async {
     final i = _transactions.indexWhere((t) => t.id == id);
