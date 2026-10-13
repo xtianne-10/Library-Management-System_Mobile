@@ -7,6 +7,14 @@ import 'package:library_management_system_mobile/services/borrow_api.dart';
 
 DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
+// Tolerant parser for the server's "returned" field
+DateTime? _parseReturned(dynamic v) {
+  if (v == null || v == false) return null;
+  if (v == true) return DateTime.now();
+  final s = v.toString();
+  return s.isEmpty ? null : DateTime.tryParse(s);
+}
+
 class BookTransaction {
   const BookTransaction({
     required this.id,
@@ -204,9 +212,7 @@ class LibraryService extends ChangeNotifier {
           borrowerEmail: ((r['borrowerEmail'] ?? '') as String).toLowerCase(),
           borrowedOn: DateTime.parse(r['borrowedOn'] as String),
           due: DateTime.parse(r['due'] as String),
-          returnedOn: r['returned'] == null
-              ? null
-              : DateTime.parse(r['returned'] as String),
+          returnedOn: _parseReturned(r['returned']),
           finePaid: r['finePaid'] == true,
         ));
       }
@@ -219,7 +225,10 @@ class LibraryService extends ChangeNotifier {
       if (AuthService.instance.currentUser?.role == UserRole.librarian) {
         await AuthService.instance.loadBorrowers();
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Load transactions failed: $e');
+      loadError = e.toString().replaceFirst('Exception: ', '');
+    }
   }
 
   // ---- Catalog ----
@@ -387,6 +396,12 @@ class LibraryService extends ChangeNotifier {
     } catch (e) {
       return _msg(e);
     }
+    // Reflect it right away, then sync with the server
+    final j = _transactions.indexWhere((t) => t.id == id);
+    if (j != -1) {
+      _transactions[j] = _transactions[j].markReturned(DateTime.now());
+      notifyListeners();
+    }
     await reload();
     return null;
   }
@@ -408,11 +423,11 @@ class LibraryService extends ChangeNotifier {
   }
 
   /// Used by the student side so both apps share one record.
-  Future<void> returnLatest(Book b, String email) async {
+  Future<String?> returnLatest(Book b, String email) async {
     final e = email.trim().toLowerCase();
     final i = _transactions
         .indexWhere((t) => !t.returned && t.bookId == b.id && t.borrowerEmail == e);
-    if (i == -1) return;
-    await returnBook(_transactions[i].id);
+    if (i == -1) return 'No active loan found for this book.';
+    return returnBook(_transactions[i].id);
   }
 }

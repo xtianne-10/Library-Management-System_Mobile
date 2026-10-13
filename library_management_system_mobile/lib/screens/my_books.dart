@@ -424,6 +424,45 @@ class _LoanCard extends StatefulWidget {
 
 class _LoanCardState extends State<_LoanCard> {
   bool _expanded = false;
+  bool _returning = false;
+
+  Future<void> _return() async {
+    final loan = widget.loan;
+    final messenger = ScaffoldMessenger.of(context);
+    final fine = loan.fine;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Return this book?'),
+        content: Text(loan.isOverdue
+            ? '"${loan.book.title}" is ${loan.daysOverdue} ${loan.daysOverdue == 1 ? 'day' : 'days'} overdue. A fine of ₱${fine.toStringAsFixed(2)} applies.'
+            : 'Return "${loan.book.title}" to the library?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Return')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _returning = true);
+    final err = await BorrowStore.instance.giveBackLoan(loan);
+    if (mounted) setState(() => _returning = false);
+
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(err ??
+            (fine > 0
+                ? 'Returned "${loan.book.title}". Fine due: ₱${fine.toStringAsFixed(2)}.'
+                : 'Returned "${loan.book.title}".')),
+      ));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -607,8 +646,7 @@ class _LoanCardState extends State<_LoanCard> {
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: FilledButton(
-                                      onPressed: () => BorrowStore.instance
-                                          .giveBack(loan.book),
+                                      onPressed: _returning ? null : _return,
                                       style: FilledButton.styleFrom(
                                         backgroundColor: Palette.burgundy,
                                         foregroundColor: Colors.white,
@@ -618,7 +656,15 @@ class _LoanCardState extends State<_LoanCard> {
                                             borderRadius:
                                                 BorderRadius.circular(12)),
                                       ),
-                                      child: const Text('Return'),
+                                      child: _returning
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: Colors.white),
+                                            )
+                                          : const Text('Return'),
                                     ),
                                   ),
                                 ],

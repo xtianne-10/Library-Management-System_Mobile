@@ -147,6 +147,13 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   String _studentQuery = '';
   int _borrowerView = 0; // 0 = Lookup, 1 = Transactions
 
+  final Set<String> _seenNotes = {};
+  final Set<int> _returning = {};
+
+  String _noteKey((IconData, String, String, Color) n) => '${n.$2}|${n.$3}';
+  int get _unseenCount =>
+      _notifications().where((n) => !_seenNotes.contains(_noteKey(n))).length;
+
   static const _pageSize = 5;
   int _catalogPage = 0;
   int _studentPage = 0;
@@ -405,12 +412,10 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           const SizedBox(width: 10),
           Expanded(
               child: _QuickAction(
-                  icon: Icons.person_search,
-                  label: 'Students',
-                  onTap: () => setState(() {
-                        _tab = 2;
-                        _borrowerView = 0;
-                      }))),
+                  icon: Icons.how_to_reg,
+                  label: 'Requests',
+                  badge: _lib.pendingRequests.length,
+                  onTap: _openRequests)),
         ],
       ),
       const SizedBox(height: 24),
@@ -420,15 +425,8 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         _Section('Borrow Requests (${_lib.pendingRequests.length})',
             Icons.how_to_reg),
         const SizedBox(height: 12),
-        for (final r in _lib.pendingRequests.take(5))
-          _RequestCard(
-            request: r,
-            onApprove: () => _decide(r, true),
-            onDecline: () => _decide(r, false),
-          ),
-        if (_lib.pendingRequests.length > 5)
-          Text('+ ${_lib.pendingRequests.length - 5} more waiting',
-              style: const TextStyle(color: Palette.textMuted)),
+        _RequestsBanner(
+            count: _lib.pendingRequests.length, onTap: _openRequests),
         const SizedBox(height: 16),
       ],
 
@@ -972,15 +970,20 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
             ),
             IconButton(
               tooltip: 'Notifications',
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => _NotificationsScreen(source: _notifications),
-                ),
-              ),
+              onPressed: () {
+                setState(
+                    () => _seenNotes.addAll(_notifications().map(_noteKey)));
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        _NotificationsScreen(source: _notifications),
+                  ),
+                );
+              },
               icon: Badge(
-                isLabelVisible: _notifications().isNotEmpty,
-                label: Text('${_notifications().length}'),
+                isLabelVisible: _unseenCount > 0,
+                label: Text('$_unseenCount'),
                 child: const Icon(Icons.notifications_outlined,
                     color: Palette.creamLight, size: 28),
               ),
@@ -991,20 +994,17 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     );
   }
 
-  Future<void> _decide(LoanRequest r, bool approve) async {
-    final err = approve
-        ? await _lib.approveRequest(r.id)
-        : await _lib.declineRequest(r.id);
-    if (!mounted) return;
-    _snack(err ??
-        (approve
-            ? 'Approved "${r.book.title}" for ${r.borrower}.'
-            : 'Declined the request for "${r.book.title}".'));
-  }
+  void _openRequests() => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const _RequestsScreen()),
+      );
 
   Future<void> _returnTx(BookTransaction t) async {
+    if (_returning.contains(t.id)) return; // ignore double taps
+    _returning.add(t.id);
     final fine = t.fine;
     final err = await _lib.returnBook(t.id);
+    _returning.remove(t.id);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(err ??
@@ -3182,10 +3182,14 @@ class _ResultTile extends StatelessWidget {
 
 class _QuickAction extends StatelessWidget {
   const _QuickAction(
-      {required this.icon, required this.label, required this.onTap});
+      {required this.icon,
+      required this.label,
+      required this.onTap,
+      this.badge = 0});
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final int badge;
 
   @override
   Widget build(BuildContext context) {
@@ -3201,7 +3205,11 @@ class _QuickAction extends StatelessWidget {
         ),
         child: Column(
           children: [
-            Icon(icon, color: Palette.cream, size: 24),
+            Badge(
+              isLabelVisible: badge > 0,
+              label: Text('$badge'),
+              child: Icon(icon, color: Palette.cream, size: 24),
+            ),
             const SizedBox(height: 6),
             Text(label,
                 maxLines: 1,
@@ -3347,10 +3355,12 @@ class _RequestCard extends StatelessWidget {
     required this.request,
     required this.onApprove,
     required this.onDecline,
+    this.busy = false,
   });
   final LoanRequest request;
   final VoidCallback onApprove;
   final VoidCallback onDecline;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -3380,7 +3390,7 @@ class _RequestCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: onDecline,
+                    onPressed: busy ? null : onDecline,
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFFC0121F),
                       side: const BorderSide(color: Color(0xFFC0121F)),
@@ -3391,7 +3401,7 @@ class _RequestCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: FilledButton(
-                    onPressed: onApprove,
+                    onPressed: busy ? null : onApprove,
                     style: FilledButton.styleFrom(
                       backgroundColor: Palette.burgundy,
                       foregroundColor: Colors.white,
@@ -3403,6 +3413,149 @@ class _RequestCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ---------- Borrow requests page ----------
+
+class _RequestsBanner extends StatelessWidget {
+  const _RequestsBanner({required this.count, required this.onTap});
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Palette.amber.withAlpha(30),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Palette.amber.withAlpha(120)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.hourglass_top_rounded, color: Palette.amber),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        count == 1
+                            ? '1 request waiting for approval'
+                            : '$count requests waiting for approval',
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    const Text('Tap to approve or decline',
+                        style: TextStyle(
+                            fontSize: 12, color: Palette.textMuted)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Palette.burgundy),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RequestsScreen extends StatefulWidget {
+  const _RequestsScreen();
+
+  @override
+  State<_RequestsScreen> createState() => _RequestsScreenState();
+}
+
+class _RequestsScreenState extends State<_RequestsScreen> {
+  static const _size = 5;
+  final _lib = LibraryService.instance;
+  final Set<int> _busy = {};
+  int _page = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _lib.reload();
+  }
+
+  Future<void> _decide(LoanRequest r, bool approve) async {
+    if (_busy.contains(r.id)) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy.add(r.id));
+    final err = approve
+        ? await _lib.approveRequest(r.id)
+        : await _lib.declineRequest(r.id);
+    if (mounted) setState(() => _busy.remove(r.id));
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(err ??
+            (approve
+                ? 'Approved "${r.book.title}" for ${r.borrower}.'
+                : 'Declined the request for "${r.book.title}".')),
+      ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Palette.page,
+      appBar: AppBar(
+        backgroundColor: Palette.burgundy,
+        foregroundColor: Palette.creamLight,
+        title: const Text('Borrow Requests',
+            style:
+                TextStyle(fontFamily: 'Georgia', fontWeight: FontWeight.w700)),
+      ),
+      body: ListenableBuilder(
+        listenable: _lib,
+        builder: (context, _) {
+          final reqs = _lib.pendingRequests;
+          final pages = (reqs.length / _size).ceil();
+          final page = pages <= 1 ? 0 : _page.clamp(0, pages - 1);
+          final start = page * _size;
+          final end = (start + _size).clamp(0, reqs.length);
+
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+            children: [
+              Text(
+                reqs.isEmpty
+                    ? 'No requests waiting for approval.'
+                    : '${reqs.length} ${reqs.length == 1 ? 'request' : 'requests'} waiting for approval',
+                style: const TextStyle(color: Palette.textMuted),
+              ),
+              const SizedBox(height: 14),
+              if (reqs.isEmpty)
+                const _EmptyNote(
+                    icon: Icons.verified_outlined,
+                    text: 'You\'re all caught up.')
+              else ...[
+                for (final r in reqs.sublist(start, end))
+                  _RequestCard(
+                    request: r,
+                    busy: _busy.contains(r.id),
+                    onApprove: () => _decide(r, true),
+                    onDecline: () => _decide(r, false),
+                  ),
+                _Pager(
+                  page: page,
+                  total: reqs.length,
+                  pageSize: _size,
+                  onChanged: (p) => setState(() => _page = p),
+                ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }

@@ -261,11 +261,35 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Returns an error message, or null on success.
-  String? changePassword(String current, String next) {
+  Future<String?> changePassword(String current, String next) async {
     final me = _current;
     if (me == null) return 'You are not signed in.';
-    if (me.password != current) return 'Current password is incorrect.';
     if (next == current) return 'New password must differ from the current one.';
+
+    // Signed in through the API: the server checks the current password
+    if (_token != null) {
+      try {
+        final res = await http.put(
+          Uri.parse('${ApiConfig.baseUrl}/auth/password'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $_token',
+          },
+          body: jsonEncode({'currentPassword': current, 'newPassword': next}),
+        );
+        if (res.statusCode == 200) return null;
+        Map? data;
+        try {
+          data = jsonDecode(res.body) as Map;
+        } catch (_) {}
+        return (data?['error'] as String?) ?? 'Could not change password.';
+      } catch (_) {
+        return 'Cannot reach the server.';
+      }
+    }
+
+    // Demo accounts (no server)
+    if (me.password != current) return 'Current password is incorrect.';
     final updated = me.copyWith(password: next);
     final i = _users.indexWhere((u) => identical(u, me));
     if (i != -1) _users[i] = updated;

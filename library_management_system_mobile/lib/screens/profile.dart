@@ -216,6 +216,87 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (ok == true && mounted) _logout();
   }
 
+  Future<void> _changePassword() async {
+    final cur = TextEditingController();
+    final next = TextEditingController();
+    final conf = TextEditingController();
+    final key = GlobalKey<FormState>();
+
+    InputDecoration dec(String label) => InputDecoration(
+          labelText: label,
+          isDense: true,
+          border: const OutlineInputBorder(),
+        );
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Change Password'),
+        content: SingleChildScrollView(
+          child: Form(
+            key: key,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: cur,
+                  obscureText: true,
+                  decoration: dec('Current password'),
+                  validator: (v) =>
+                      (v == null || v.isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: next,
+                  obscureText: true,
+                  decoration: dec('New password'),
+                  validator: (v) {
+                    final s = v ?? '';
+                    if (s.length < 8) return 'At least 8 characters';
+                    if (!RegExp(r'[A-Za-z]').hasMatch(s) ||
+                        !RegExp(r'[0-9]').hasMatch(s)) {
+                      return 'Use letters and numbers';
+                    }
+                    if (s == cur.text) return 'Must differ from current';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: conf,
+                  obscureText: true,
+                  decoration: dec('Confirm new password'),
+                  validator: (v) =>
+                      v == next.text ? null : 'Passwords don\'t match',
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (key.currentState!.validate()) Navigator.pop(c, true);
+            },
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      final err =
+          await AuthService.instance.changePassword(cur.text, next.text);
+      if (!mounted) return;
+      _snack(err ?? 'Password changed.');
+    }
+    cur.dispose();
+    next.dispose();
+    conf.dispose();
+  }
+
   void _logout() {
     AuthService.instance.logout();
     Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
@@ -633,6 +714,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           child: const Text('Cancel'),
                         ),
                       ),
+                    if (!_editing) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _changePassword,
+                          icon: const Icon(Icons.lock_reset, size: 18),
+                          label: const Text('Change password'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Palette.burgundy,
+                            side: const BorderSide(color: Palette.burgundy),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 8),
 
                     // Logout

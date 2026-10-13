@@ -153,9 +153,13 @@ class BorrowStore extends ChangeNotifier {
 
   bool isAvailable(Book b) => copiesLeft(b) > 0;
 
-  Future<void> giveBack(Book b) async {
+  Future<String?> giveBack(Book b) async {
     final user = AuthService.instance.currentUser;
-    if (user == null) return;
-    await LibraryService.instance.returnLatest(b, user.email);
+    if (user == null) return 'Please sign in first.';
+    return LibraryService.instance.returnLatest(b, user.email);
   }
+
+  // Returns exactly this loan. Returns an error message, or null on success
+  Future<String?> giveBackLoan(BorrowedBook loan) =>
+      LibraryService.instance.returnBook(loan.txId);
 }
