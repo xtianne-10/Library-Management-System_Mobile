@@ -16,6 +16,18 @@ String _greeting() {
   return 'Good evening';
 }
 
+String _days(int n) => n == 1 ? 'day' : 'days';
+
+// Shared surface styling so every card looks like part of one system.
+const _cardBorder = Color(0x1A55161D);
+const _cardShadow = [
+  BoxShadow(
+    color: Color(0x1255161D),
+    blurRadius: 18,
+    offset: Offset(0, 6),
+  ),
+];
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -62,12 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
     final topInset = MediaQuery.of(context).padding.top;
-    final user = AuthService.instance.currentUser;
-    final firstName = (user?.firstName.trim().isNotEmpty ?? false)
-        ? user!.firstName.trim()
-        : 'Reader';
 
     if (_loading) {
       return const Scaffold(
@@ -84,88 +91,62 @@ class _HomeScreenState extends State<HomeScreen> {
         body: ListView(
           padding: EdgeInsets.zero,
           children: [
-            // Welcome header
-            Container(
-              padding: EdgeInsets.fromLTRB(20, topInset + 16, 20, 24),
-              decoration: const BoxDecoration(
-                color: Palette.burgundy,
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(28),
-                  bottomRight: Radius.circular(28),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('${_greeting()}, $firstName',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: text.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: Palette.creamLight,
-                            )),
-                        const SizedBox(height: 2),
-                        Text('Knowledge is the truest magic.',
-                            style: text.bodyMedium?.copyWith(
-                              color: Palette.creamMuted,
-                            )),
-                      ],
+            // Header + summary card that overlaps the header edge
+            Stack(
+              children: [
+                Positioned.fill(
+                  bottom: 44,
+                  child: const DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Palette.burgundy,
+                      borderRadius: BorderRadius.only(
+                        bottomLeft: Radius.circular(28),
+                        bottomRight: Radius.circular(28),
+                      ),
                     ),
                   ),
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: Palette.cream,
-                    backgroundImage: user?.avatar != null
-                        ? MemoryImage(user!.avatar!)
-                        : null,
-                    child: user?.avatar == null
-                        ? Text(
-                            user?.initial ?? '?',
-                            style: const TextStyle(
-                              color: Palette.burgundy,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          )
-                        : null,
+                ),
+                Padding(
+                  padding: EdgeInsets.fromLTRB(20, topInset + 16, 20, 0),
+                  child: Column(
+                    children: [
+                      _Header(onSearch: _goExplore),
+                      const SizedBox(height: 24),
+                      ListenableBuilder(
+                        listenable: BorrowStore.instance,
+                        builder: (context, _) {
+                          final store = BorrowStore.instance;
+                          return _SummaryCard(
+                            borrowed: store.items.length,
+                            pending: store.myPendingRequests.length,
+                            overdue: store.overdue.length,
+                            returned: store.history.length,
+                            onTap: () => _goMyBooks(),
+                          );
+                        },
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const SizedBox(height: 24),
 
-            // Borrowing summary + pending shortcut
+            // Pending requests shortcut (only when there are some)
             ListenableBuilder(
               listenable: BorrowStore.instance,
               builder: (context, _) {
-                final store = BorrowStore.instance;
-                final pending = store.myPendingRequests.length;
+                final pending = BorrowStore.instance.myPendingRequests.length;
+                if (pending == 0) return const SizedBox(height: 8);
                 return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    children: [
-                      _SummaryCard(
-                        borrowed: store.items.length,
-                        pending: pending,
-                        overdue: store.overdue.length,
-                        returned: store.history.length,
-                        onTap: () => _goMyBooks(),
-                      ),
-                      if (pending > 0) ...[
-                        const SizedBox(height: 12),
-                        _PendingBanner(
-                          count: pending,
-                          onTap: () => _goMyBooks(tab: 'pending'),
-                        ),
-                      ],
-                    ],
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                  child: _PendingBanner(
+                    count: pending,
+                    onTap: () => _goMyBooks(tab: 'pending'),
                   ),
                 );
               },
             ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 24),
 
             // Due soon (nearest one + a link)
             _SectionTitle('Due soon', onSeeAll: () => _goMyBooks()),
@@ -177,8 +158,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (loans.isEmpty) {
                   return const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 20),
-                    child: Text(
-                        'No borrowed books yet. Head to Explore to find one.'),
+                    child: _EmptyCard(
+                      icon: Icons.menu_book_outlined,
+                      message:
+                          'No borrowed books yet. Head to Explore to find one.',
+                    ),
                   );
                 }
                 final next =
@@ -191,9 +175,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       _DueSoonCard(book: next.book, daysLeft: next.daysLeft),
                       if (more > 0)
-                        TextButton(
-                          onPressed: () => _goMyBooks(),
-                          child: Text('+ $more more on loan'),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: TextButton(
+                            style: TextButton.styleFrom(
+                              foregroundColor: Palette.burgundy,
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(0, 36),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () => _goMyBooks(),
+                            child: Text('+ $more more on loan'),
+                          ),
                         ),
                     ],
                   ),
@@ -204,15 +197,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
             // Recommended
             _SectionTitle('Recommended for you', onSeeAll: _goExplore),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             if (recommended.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20),
-                child: Text('No recommendations right now.'),
+                child: _EmptyCard(
+                  icon: Icons.auto_stories_outlined,
+                  message: 'No recommendations right now.',
+                ),
               )
             else
               SizedBox(
-                height: 250,
+                height: 262,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -221,7 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemBuilder: (context, i) => _BookTile(book: recommended[i]),
                 ),
               ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 28),
           ],
         ),
         bottomNavigationBar: const AppNavBar(currentIndex: 0),
@@ -230,7 +226,113 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// Widgets
+// Header
+
+class _Header extends StatelessWidget {
+  const _Header({required this.onSearch});
+  final VoidCallback onSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final user = AuthService.instance.currentUser;
+    final firstName = (user?.firstName.trim().isNotEmpty ?? false)
+        ? user!.firstName.trim()
+        : 'Reader';
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _greeting().toUpperCase(),
+                    style: text.labelSmall?.copyWith(
+                      color: Palette.creamMuted,
+                      letterSpacing: 1.4,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    firstName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: Palette.creamLight,
+                      height: 1.15,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Palette.cream.withValues(alpha: 0.45),
+                  width: 1.5,
+                ),
+              ),
+              child: CircleAvatar(
+                radius: 22,
+                backgroundColor: Palette.cream,
+                backgroundImage:
+                    user?.avatar != null ? MemoryImage(user!.avatar!) : null,
+                child: user?.avatar == null
+                    ? Text(
+                        user?.initial ?? '?',
+                        style: const TextStyle(
+                          color: Palette.burgundy,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    : null,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        // Search shortcut: opens Explore
+        Material(
+          color: Colors.white.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            onTap: onSearch,
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.search, size: 20, color: Palette.creamMuted),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Search books, authors, topics',
+                      style: text.bodyMedium
+                          ?.copyWith(color: Palette.creamMuted),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// Section title
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle(this.title, {this.onSeeAll});
@@ -246,14 +348,62 @@ class _SectionTitle extends StatelessWidget {
           Expanded(
             child: Text(
               title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: Palette.burgundy,
+                    color: Palette.textDark,
                   ),
             ),
           ),
           if (onSeeAll != null)
-            TextButton(onPressed: onSeeAll, child: const Text('See all')),
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: Palette.burgundy,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: onSeeAll,
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('See all',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  Icon(Icons.chevron_right, size: 18),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// Empty state
+
+class _EmptyCard extends StatelessWidget {
+  const _EmptyCard({required this.icon, required this.message});
+  final IconData icon;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+      decoration: BoxDecoration(
+        color: Palette.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _cardBorder),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Palette.textMuted),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(message,
+                style: text.bodyMedium?.copyWith(color: Palette.textMuted)),
+          ),
         ],
       ),
     );
@@ -281,47 +431,61 @@ class _SummaryCard extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     return Expanded(
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text('$value',
               style: text.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w700,
                 color: color ?? Palette.burgundy,
+                height: 1.1,
               )),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           Text(label,
-              style: text.bodySmall?.copyWith(color: Palette.textMuted)),
+              style: text.bodySmall?.copyWith(
+                color: Palette.textMuted,
+                fontWeight: FontWeight.w500,
+              )),
         ],
       ),
     );
   }
 
+  Widget _divider() => Container(
+        width: 1,
+        height: 32,
+        color: const Color(0x1F55161D),
+      );
+
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Palette.card,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0x2655161D)),
-          ),
-          child: Row(
-            children: [
-              _stat(context, borrowed, 'Borrowed'),
-              _stat(context, pending, 'Pending',
-                  color: pending == 0 ? null : Palette.amber),
-              _stat(context, overdue, 'Overdue',
-                  color: overdue == 0 ? null : Colors.red.shade700),
-              _stat(context, returned, 'Returned'),
-              const Padding(
-                padding: EdgeInsets.only(right: 8),
-                child: Icon(Icons.chevron_right, color: Palette.textMuted),
-              ),
-            ],
+    return Container(
+      decoration: BoxDecoration(
+        color: Palette.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _cardBorder),
+        boxShadow: _cardShadow,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            child: Row(
+              children: [
+                _stat(context, borrowed, 'Borrowed'),
+                _divider(),
+                _stat(context, pending, 'Pending',
+                    color: pending == 0 ? null : Palette.amber),
+                _divider(),
+                _stat(context, overdue, 'Overdue',
+                    color: overdue == 0 ? null : Colors.red.shade700),
+                _divider(),
+                _stat(context, returned, 'Returned'),
+              ],
+            ),
           ),
         ),
       ),
@@ -343,15 +507,29 @@ class _PendingBanner extends StatelessWidget {
 
     return Material(
       color: Palette.amber.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Palette.amber.withValues(alpha: 0.35)),
+          ),
           child: Row(
             children: [
-              const SizedBox(width: 10),
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: Palette.amber.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.hourglass_top_rounded,
+                    size: 18, color: Palette.amber),
+              ),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   count == 1
@@ -363,11 +541,6 @@ class _PendingBanner extends StatelessWidget {
                   ),
                 ),
               ),
-              Text('View',
-                  style: text.bodyMedium?.copyWith(
-                    color: Palette.burgundy,
-                    fontWeight: FontWeight.w700,
-                  )),
               const Icon(Icons.chevron_right, color: Palette.burgundy),
             ],
           ),
@@ -449,15 +622,46 @@ class _BookTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final badge = book.isNewArrival
+        ? 'New'
+        : book.isPopular
+            ? 'Popular'
+            : null;
+
     return SizedBox(
-      width: 120,
+      width: 130,
       child: InkWell(
         onTap: () => openBookDetails(context, book),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _BookCover(book: book),
+            Stack(
+              children: [
+                _BookCover(book: book, width: 130, height: 184),
+                if (badge != null)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Palette.cream,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        badge,
+                        style: const TextStyle(
+                          color: Palette.burgundy,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(height: 10),
             Text(book.title,
                 maxLines: 1,
@@ -466,6 +670,7 @@ class _BookTile extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                   color: Palette.textDark,
                 )),
+            const SizedBox(height: 1),
             Text(book.author,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -489,45 +694,90 @@ class _DueSoonCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
 
+    final overdue = daysLeft < 0;
+    final soon = daysLeft <= 3;
+    final statusColor = overdue
+        ? Colors.red.shade700
+        : soon
+            ? Palette.amber
+            : Colors.green.shade700;
+    final statusLabel = overdue
+        ? '${-daysLeft} ${_days(-daysLeft)} overdue'
+        : daysLeft == 0
+            ? 'Due today'
+            : 'Due in $daysLeft ${_days(daysLeft)}';
+
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Palette.burgundy,
-        borderRadius: BorderRadius.circular(16),
+        color: Palette.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _cardBorder),
+        boxShadow: _cardShadow,
       ),
       child: Row(
         children: [
-          _BookCover(book: book, width: 64, height: 92),
+          _BookCover(book: book, width: 68, height: 98),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(book.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: text.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
-                      color: Palette.creamLight,
+                      color: Palette.textDark,
+                      height: 1.2,
                     )),
+                const SizedBox(height: 2),
                 Text(book.author,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: text.bodyMedium
-                        ?.copyWith(color: Palette.creamMuted)),
-                const SizedBox(height: 8),
-                Text(
-                    daysLeft < 0
-                        ? '${-daysLeft} days overdue'
-                        : 'Due in $daysLeft days',
-                    style: text.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: Palette.cream,
-                    )),
-                const SizedBox(height: 8),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Palette.amber,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () {},
-                  child: const Text('Renew'),
+                        ?.copyWith(color: Palette.textMuted)),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.schedule, size: 13, color: statusColor),
+                          const SizedBox(width: 5),
+                          Text(
+                            statusLabel,
+                            style: text.labelMedium?.copyWith(
+                              color: statusColor,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Palette.burgundy,
+                        side: const BorderSide(color: Palette.burgundy),
+                        minimumSize: const Size(0, 34),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      onPressed: () {},
+                      child: const Text('Renew',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                  ],
                 ),
               ],
             ),
