@@ -8,6 +8,7 @@ import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/globes/borrow_store.dart';
 import 'package:library_management_system_mobile/screens/book_details.dart';
+import 'package:library_management_system_mobile/widgets/book_cover.dart';
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -36,35 +37,42 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  List<Book> _books = [];
-  bool _loading = true;
+  final _lib = LibraryService.instance;
+  bool _loading = LibraryService.instance.books.isEmpty;
+
+  // Always read straight from the service (MongoDB via the API)
+  List<Book> get _books => _lib.books;
 
   @override
   void initState() {
     super.initState();
-    LibraryService.instance.ensureLoaded().then((books) {
-      if (!mounted) return;
-      setState(() {
-        _books = books;
-        _loading = false;
-      });
-    }).catchError((Object e) {
-      debugPrint('Failed to load books: $e');
-      if (!mounted) return;
-      setState(() => _loading = false);
+    _lib.addListener(_refresh);
+    // Re-fetch every time Home opens so web changes show up
+    _lib.reload().whenComplete(() {
+      if (mounted) setState(() => _loading = false);
     });
   }
 
-  // Featured picks: popular or new, available, and not already borrowed
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _lib.removeListener(_refresh);
+    super.dispose();
+  }
+
+  // Featured picks: available books the user isn't already borrowing, newest first
   List<Book> get _recommended {
-    final store = BorrowStore.instance;
-    return _books
-        .where((b) =>
-            (b.isPopular || b.isNewArrival) &&
-            store.isAvailable(b) &&
-            !store.isBorrowed(b))
-        .take(8)
-        .toList();
+    final email = AuthService.instance.currentUser?.email ?? '';
+    final mine = _lib.activeLoansOf(email).map((t) => t.bookId).toSet();
+    final list = _books
+        .where((b) => _lib.isAvailable(b) && !mine.contains(b.id))
+        .toList()
+      ..sort((a, b) => (b.published ?? DateTime(0))
+          .compareTo(a.published ?? DateTime(0)));
+    return list.take(8).toList();
   }
 
   // Pass tab: 'pending' to open My Books on the Pending tab
@@ -560,57 +568,8 @@ class _BookCover extends StatelessWidget {
   final double height;
 
   @override
-  Widget build(BuildContext context) {
-    final hsl = HSLColor.fromColor(book.color);
-    final spine = hsl.withLightness((hsl.lightness - 0.08).clamp(0.0, 1.0));
-
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: book.color,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(3),
-          bottomLeft: Radius.circular(3),
-          topRight: Radius.circular(8),
-          bottomRight: Radius.circular(8),
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 8,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(width: width * 0.08, color: spine.toColor()),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(10),
-              child: Align(
-                alignment: Alignment.topLeft,
-                child: Text(
-                  book.title,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Palette.gold,
-                    fontFamily: 'Georgia',
-                    fontFamilyFallback: const ['serif'],
-                    fontWeight: FontWeight.w700,
-                    fontSize: width * 0.13,
-                    height: 1.2,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      BookCover(book: book, width: width, height: height);
 }
 
 // Recommended tile
@@ -622,11 +581,10 @@ class _BookTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final badge = book.isNewArrival
+    final pub = book.published;
+    final badge = (pub != null && DateTime.now().difference(pub).inDays < 365)
         ? 'New'
-        : book.isPopular
-            ? 'Popular'
-            : null;
+        : null;
 
     return SizedBox(
       width: 130,

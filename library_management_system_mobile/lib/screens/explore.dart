@@ -5,7 +5,8 @@ import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/app_nav_bar.dart';
 import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/screens/book_details.dart';
-import 'package:library_management_system_mobile/globes/borrow_store.dart';
+import 'package:library_management_system_mobile/services/library_service.dart';
+import 'package:library_management_system_mobile/widgets/book_cover.dart';
 
 enum _Sort {
   title('Title A–Z'),
@@ -23,6 +24,15 @@ const _creamLine = Color(0xFFE8DCC8);
 const _serif = 'Georgia';
 const _serifFallback = ['serif'];
 
+// Same colors as the web categories
+Color _categoryColor(String c) => switch (c) {
+      'Fiction' => const Color(0xFFE99B1C),
+      'Non-Fiction' => const Color(0xFFC0151F),
+      'Academic' => const Color(0xFF0E3F8A),
+      'Restricted' => const Color(0xFF0A7A46),
+      _ => Palette.burgundy,
+    };
+
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
 
@@ -32,9 +42,13 @@ class ExploreScreen extends StatefulWidget {
 
 class _ExploreScreenState extends State<ExploreScreen> {
   final _searchController = TextEditingController();
+  final _searchFocus = FocusNode();
 
-  List<Book> _books = [];
-  bool _loading = true;
+  final _lib = LibraryService.instance;
+
+  // Always read straight from the service (MongoDB via the API)
+  List<Book> get _books => _lib.books;
+  bool _loading = LibraryService.instance.books.isEmpty;
   String? _error;
 
   String _query = '';
@@ -51,29 +65,23 @@ class _ExploreScreenState extends State<ExploreScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
     setState(() {
-      _loading = true;
+      _loading = _lib.books.isEmpty;
       _error = null;
     });
-    try {
-      final books = await BookRepository.loadBooks();
-      if (!mounted) return;
-      setState(() {
-        _books = books;
-        _loading = false;
-      });
-    } catch (e) {
-      debugPrint('Failed to load books: $e');
-      if (!mounted) return;
-      setState(() {
-        _error = 'We couldn\'t load the catalog.';
-        _loading = false;
-      });
-    }
+    await _lib.reload();
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _error = (_lib.books.isEmpty && _lib.loadError != null)
+          ? 'We couldn\'t load the catalog.'
+          : null;
+    });
   }
 
   List<Book> get _results {
@@ -81,7 +89,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
     final list = _books.where((b) {
       if (_category != 'All' && b.category != _category) return false;
-      if (_availableOnly && !BorrowStore.instance.isAvailable(b)) return false;
+      if (_availableOnly && !_lib.isAvailable(b)) return false;
       if (q.isEmpty) return true;
       return b.title.toLowerCase().contains(q) ||
           b.author.toLowerCase().contains(q) ||
@@ -99,12 +107,12 @@ class _ExploreScreenState extends State<ExploreScreen> {
       case _Sort.newest:
         // Books with no year go last.
         list.sort((a, b) {
-          final ay = a.year;
-          final by = b.year;
-          if (ay == null && by == null) return 0;
-          if (ay == null) return 1;
-          if (by == null) return -1;
-          return by.compareTo(ay);
+          final ap = a.published;
+          final bp = b.published;
+          if (ap == null && bp == null) return 0;
+          if (ap == null) return 1;
+          if (bp == null) return -1;
+          return bp.compareTo(ap);
         });
     }
     return list;
@@ -129,7 +137,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
       child: Scaffold(
         backgroundColor: Palette.page,
         body: ListenableBuilder(
-          listenable: BorrowStore.instance,
+          listenable: LibraryService.instance,
           builder: (context, _) => _buildBody(context),
         ),
         bottomNavigationBar: const AppNavBar(currentIndex: 1),
@@ -197,45 +205,78 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   style: text.bodyMedium?.copyWith(color: Palette.creamMuted),
                 ),
                 const SizedBox(height: 18),
-                SearchBar(
-                  controller: _searchController,
-                  hintText: 'Search titles, authors, or topics',
-                  hintStyle: const WidgetStatePropertyAll(
-                    TextStyle(color: Palette.textMuted),
-                  ),
-                  textStyle: const WidgetStatePropertyAll(
-                    TextStyle(color: Palette.textDark),
-                  ),
-                  leading: const Icon(Icons.search, color: Palette.burgundy),
-                  trailing: [
-                    if (_query.isNotEmpty)
-                      IconButton(
-                        tooltip: 'Clear search',
-                        icon: const Icon(Icons.close, color: Palette.burgundy),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _query = '');
-                        },
-                      ),
-                  ],
-                  backgroundColor: const WidgetStatePropertyAll(Palette.card),
-                  elevation: const WidgetStatePropertyAll(2),
-                  shadowColor: const WidgetStatePropertyAll(Colors.black45),
-                  shape: WidgetStatePropertyAll(
-                    RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(28),
-                    ),
-                  ),
-                  padding: const WidgetStatePropertyAll(
-                    EdgeInsets.symmetric(horizontal: 16),
-                  ),
-                  onChanged: (v) => setState(() => _query = v),
-                ),
+                _buildSearchField(),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  // Search field: the exact frosted look of the Home screen's search field,
+  // as a real input. The border and fill brighten slightly while focused.
+  Widget _buildSearchField() {
+    return ListenableBuilder(
+      listenable: _searchFocus,
+      builder: (context, _) {
+        final focused = _searchFocus.hasFocus;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: focused ? 0.18 : 0.12),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: focused ? 0.4 : 0.16),
+            ),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.search, size: 20, color: Palette.creamMuted),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  focusNode: _searchFocus,
+                  textInputAction: TextInputAction.search,
+                  cursorColor: Palette.creamLight,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: Palette.creamLight),
+                  onChanged: (v) => setState(() => _query = v),
+                  decoration: InputDecoration(
+                    hintText: 'Search titles, authors, or topics',
+                    hintStyle: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(color: Palette.creamMuted),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    filled: false,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+              if (_query.isNotEmpty)
+                GestureDetector(
+                  onTap: () {
+                    _searchController.clear();
+                    setState(() => _query = '');
+                  },
+                  child: const Padding(
+                    padding: EdgeInsets.only(left: 8),
+                    child: Icon(Icons.close,
+                        size: 20, color: Palette.creamMuted),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -302,16 +343,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
       );
     }
 
-    // Categories come from books.json, not a hard-coded list.
-    final categories = categoriesOf(_books);
+    // Same four categories the web uses
+    const categories = ['All', 'Fiction', 'Non-Fiction', 'Academic', 'Restricted'];
     final results = _results;
-    final newArrivals = _books.where((b) => b.isNewArrival).toList();
-    final popular = _books.where((b) => b.isPopular).toList();
     final text = Theme.of(context).textTheme;
 
-    final pool = newArrivals.isNotEmpty ? newArrivals : popular;
-    final spotlight = pool.where((b) => b.description.isNotEmpty).firstOrNull ??
-        pool.firstOrNull;
+    // Like the web: newest available books
+    final newArrivals = (_books.where((b) => _lib.isAvailable(b)).toList()
+          ..sort((a, b) => (b.published ?? DateTime(0))
+              .compareTo(a.published ?? DateTime(0))))
+        .take(10)
+        .toList();
+    final spotlight =
+        newArrivals.where((b) => b.description.isNotEmpty).firstOrNull ??
+            newArrivals.firstOrNull;
 
     final heading = _query.trim().isNotEmpty
         ? 'Search results'
@@ -351,15 +396,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       ),
                     ),
                   ),
-                SliverToBoxAdapter(
-                  child: _FadeSlide(
-                    child: _Shelf(
-                      title: 'Popular this week',
-                      tint: Palette.amber,
-                      books: popular,
-                    ),
-                  ),
-                ),
+
                 for (final c in categories.where((c) => c != 'All'))
                   SliverToBoxAdapter(
                     child: _FadeSlide(
@@ -489,21 +526,30 @@ class _ExploreScreenState extends State<ExploreScreen> {
               else
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
-                  sliver: SliverGrid(
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 14,
-                      mainAxisSpacing: 14,
-                      childAspectRatio: 0.6,
-                    ),
-                    delegate: SliverChildBuilderDelegate(
-                      (context, i) => _BookCard(
-                        book: results[i],
-                        onTap: () => openBookDetails(context, results[i]),
-                      ),
-                      childCount: results.length,
-                    ),
+                  sliver: SliverLayoutBuilder(
+                    builder: (context, constraints) {
+                      const gap = 12.0;
+                      const cols = 3;
+                      // Cover is always 2:3, text area gets a fixed height
+                      final tileW =
+                          (constraints.crossAxisExtent - gap * (cols - 1)) /
+                              cols;
+                      return SliverGrid(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: cols,
+                          crossAxisSpacing: gap,
+                          mainAxisSpacing: 18,
+                          mainAxisExtent: tileW * 1.5 + 78,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (context, i) => _BookCard(
+                            book: results[i],
+                            onTap: () => openBookDetails(context, results[i]),
+                          ),
+                          childCount: results.length,
+                        ),
+                      );
+                    },
                   ),
                 ),
             ],
@@ -946,63 +992,97 @@ class _BookCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final accent = _categoryColor(book.category);
 
-    return Material(
-      color: Palette.card,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: _border),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Stack(
-                  children: [
-                    Positioned.fill(child: _Cover(book: book)),
-                    Positioned(
-                      top: 8,
-                      left: 14,
-                      child: _StatusBadge(book: book),
-                    ),
-                  ],
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(child: _Cover(book: book)),
+                Positioned(
+                  top: 6,
+                  left: 6,
+                  child: _StatusDot(book: book),
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(book.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: text.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: Palette.textDark,
+                height: 1.2,
+              )),
+          const SizedBox(height: 2),
+          Text(book.author,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: text.labelSmall?.copyWith(color: Palette.textMuted)),
+          const SizedBox(height: 5),
+          Row(
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
               ),
-              const SizedBox(height: 10),
-              Text(book.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: text.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: Palette.textDark,
-                  )),
-              const SizedBox(height: 1),
-              Text(book.author,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: text.bodySmall?.copyWith(color: Palette.textMuted)),
-              const SizedBox(height: 2),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(book.category,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.labelSmall?.copyWith(
+                      color: Palette.textMuted,
+                      fontWeight: FontWeight.w600,
+                    )),
+              ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
-/// Solid status pill laid over a cover.
+/// Compact status marker for small covers (icon only).
+class _StatusDot extends StatelessWidget {
+  const _StatusDot({required this.book});
+  final Book book;
+
+  @override
+  Widget build(BuildContext context) {
+    final isAvail = LibraryService.instance.isAvailable(book);
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: isAvail ? Palette.slytherin : Palette.amber,
+        shape: BoxShape.circle,
+        boxShadow: const [
+          BoxShadow(color: Color(0x33000000), blurRadius: 4),
+        ],
+      ),
+      child: Icon(isAvail ? Icons.check : Icons.schedule,
+          size: 11, color: Colors.white),
+    );
+  }
+}
+
+// Solid status pill laid over a cover.
 class _StatusBadge extends StatelessWidget {
   const _StatusBadge({required this.book});
   final Book book;
 
   @override
   Widget build(BuildContext context) {
-    final isAvail = BorrowStore.instance.isAvailable(book);
+    final isAvail = LibraryService.instance.isAvailable(book);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
@@ -1041,7 +1121,7 @@ class _AvailabilityLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final store = BorrowStore.instance;
+    final store = LibraryService.instance;
     final isAvail = store.isAvailable(book);
     final color = isAvail ? Palette.slytherin : Palette.amber;
     final label = isAvail
@@ -1074,59 +1154,7 @@ class _Cover extends StatelessWidget {
   final Book book;
 
   @override
-  Widget build(BuildContext context) {
-    final hsl = HSLColor.fromColor(book.color);
-    final spine = hsl.withLightness((hsl.lightness - 0.08).clamp(0.0, 1.0));
-
-    return LayoutBuilder(builder: (context, constraints) {
-      final width = constraints.maxWidth;
-
-      return Container(
-        decoration: BoxDecoration(
-          color: book.color,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(3),
-            bottomLeft: Radius.circular(3),
-            topRight: Radius.circular(8),
-            bottomRight: Radius.circular(8),
-          ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x33000000),
-              blurRadius: 8,
-              offset: Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(width: width * 0.08, color: spine.toColor()),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Align(
-                  alignment: Alignment.bottomLeft,
-                  child: Text(
-                    book.title,
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Palette.gold,
-                      fontFamily: _serif,
-                      fontFamilyFallback: _serifFallback,
-                      fontWeight: FontWeight.w700,
-                      fontSize: (width * 0.13).clamp(11.0, 20.0),
-                      height: 1.2,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    });
-  }
+  Widget build(BuildContext context) => BookCover(book: book);
 }
 
 class _MessageState extends StatelessWidget {
