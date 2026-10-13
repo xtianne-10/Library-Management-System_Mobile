@@ -10,6 +10,7 @@ class Book {
     required this.title,
     required this.author,
     required this.category,
+    this.subcategory = '',
     required this.color,
     this.description = '',
     this.year,
@@ -29,6 +30,7 @@ class Book {
   final String title;
   final String author;
   final String category;
+  final String subcategory;
   final Color color;
   final String description;
   final int? year;
@@ -40,7 +42,7 @@ class Book {
   final String publisher;
   final DateTime? published;
   final String imageUrl;
-  final Uint8List? imageBytes; // picked from gallery
+  final Uint8List? imageBytes;
 
   bool get available => copiesAvailable > 0;
 
@@ -50,6 +52,7 @@ class Book {
     String? title,
     String? author,
     String? category,
+    String? subcategory,
     String? description,
     String? publisher,
     DateTime? published,
@@ -65,6 +68,7 @@ class Book {
         title: title ?? this.title,
         author: author ?? this.author,
         category: category ?? this.category,
+        subcategory: subcategory ?? this.subcategory,
         color: color,
         description: description ?? this.description,
         year: year,
@@ -79,8 +83,8 @@ class Book {
         imageBytes: clearImageBytes ? null : (imageBytes ?? this.imageBytes),
       );
 
-  /// Same fields the web uses: id, title, author, publisher, category,
-  /// published (YYYY-MM-DD), description, image, cover, copies.
+  // Same fields the web uses: id, title, author, publisher, category,
+  // published (YYYY-MM-DD), description, image, cover, copies.
   factory Book.fromServer(Map<String, dynamic> j, {required int localId}) {
     final img = (j['image'] as String?) ?? '';
     Uint8List? bytes;
@@ -103,6 +107,7 @@ class Book {
       title: (j['title'] ?? '') as String,
       author: (j['author'] ?? '') as String,
       category: (j['category'] ?? '') as String,
+      subcategory: (j['subcategory'] ?? '').toString(),
       color: color,
       description: (j['description'] ?? '') as String,
       publisher: (j['publisher'] ?? '') as String,
@@ -122,6 +127,7 @@ class Book {
       'author': author,
       'publisher': publisher,
       'category': category,
+      'subcategory': subcategory,
       'published': p == null ? '' : '${p.year}-${two(p.month)}-${two(p.day)}',
       'description': description,
       'image': imageBytes != null
@@ -136,6 +142,7 @@ class Book {
         title: json['title'] as String,
         author: json['author'] as String,
         category: json['category'] as String,
+        subcategory: (json['subcategory'] ?? '').toString(),
         color: _hexToColor(json['color'] as String),
         description: json['description'] as String? ?? '',
         year: json['year'] as int?,

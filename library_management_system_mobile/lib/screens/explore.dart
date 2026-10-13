@@ -24,6 +24,10 @@ const _creamLine = Color(0xFFE8DCC8);
 const _serif = 'Georgia';
 const _serifFallback = ['serif'];
 
+const _pageSize = 18; // 6 rows of 3
+const _searchHeight = 50.0;
+const _stickTop = 70.0; // pinned category bar (58) + 12 top margin
+
 // Same colors as the web categories
 Color _categoryColor(String c) => switch (c) {
       'Fiction' => const Color(0xFFE99B1C),
@@ -56,6 +60,16 @@ class _ExploreScreenState extends State<ExploreScreen> {
   bool _availableOnly = false;
   _Sort _sort = _Sort.title;
 
+  String _sub = 'All';
+  String _lastCategory = 'All';
+  String _lastFilterKey = '';
+  int _page = 1;
+
+  final _scroll = ScrollController();
+  final _slotKey = GlobalKey();
+  final _resultsKey = GlobalKey();
+  double? _slotTop;
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +80,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   void dispose() {
     _searchController.dispose();
     _searchFocus.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -89,6 +104,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
     final list = _books.where((b) {
       if (_category != 'All' && b.category != _category) return false;
+      if (_sub != 'All' && b.subcategory != _sub) return false;
       if (_availableOnly && !_lib.isAvailable(b)) return false;
       if (q.isEmpty) return true;
       return b.title.toLowerCase().contains(q) ||
@@ -147,7 +163,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   // Hero header: eyebrow, headline, search
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, {bool inlineSearch = true}) {
     final text = Theme.of(context).textTheme;
     final topInset = MediaQuery.of(context).padding.top;
 
@@ -205,7 +221,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   style: text.bodyMedium?.copyWith(color: Palette.creamMuted),
                 ),
                 const SizedBox(height: 18),
-                _buildSearchField(),
+                inlineSearch
+                    ? _buildSearchField()
+                    : SizedBox(key: _slotKey, height: _searchHeight),
               ],
             ),
           ),
@@ -214,44 +232,62 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 
-  // Search field: the exact frosted look of the Home screen's search field,
-  // as a real input. The border and fill brighten slightly while focused.
-  Widget _buildSearchField() {
+    // Search field. Over the hero it is frosted glass; once stuck it becomes a
+  // semi-transparent light card that turns solid while focused or typed in.
+  Widget _buildSearchField({bool stuck = false}) {
     return ListenableBuilder(
       listenable: _searchFocus,
       builder: (context, _) {
+        final body = Theme.of(context).textTheme.bodyMedium;
         final focused = _searchFocus.hasFocus;
+        final solid = focused || _query.isNotEmpty;
+
+        final Color fill;
+        final Color line;
+        if (stuck) {
+          fill = Colors.white.withValues(alpha: solid ? 1 : 0.72);
+          line = Palette.burgundy.withValues(alpha: focused ? 0.4 : 0.12);
+        } else {
+          fill = Colors.white.withValues(alpha: focused ? 0.18 : 0.12);
+          line = Colors.white.withValues(alpha: focused ? 0.4 : 0.16);
+        }
+        final textColor = stuck ? Palette.textDark : Palette.creamLight;
+        final mutedColor = stuck ? Palette.textMuted : Palette.creamMuted;
+        final iconColor = stuck ? Palette.burgundy : Palette.creamMuted;
+
         return AnimatedContainer(
           duration: const Duration(milliseconds: 180),
+          height: _searchHeight,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: focused ? 0.18 : 0.12),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: focused ? 0.4 : 0.16),
-            ),
+            color: fill,
+            borderRadius: BorderRadius.circular(stuck ? 25 : 14),
+            border: Border.all(color: line),
+            boxShadow: stuck
+                ? const [
+                    BoxShadow(
+                      color: Color(0x2E000000),
+                      blurRadius: 18,
+                      offset: Offset(0, 6),
+                    ),
+                  ]
+                : null,
           ),
           child: Row(
             children: [
-              const Icon(Icons.search, size: 20, color: Palette.creamMuted),
+              Icon(Icons.search, size: 20, color: iconColor),
               const SizedBox(width: 10),
               Expanded(
                 child: TextField(
                   controller: _searchController,
                   focusNode: _searchFocus,
                   textInputAction: TextInputAction.search,
-                  cursorColor: Palette.creamLight,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: Palette.creamLight),
+                  cursorColor: textColor,
+                  style: body?.copyWith(color: textColor),
                   onChanged: (v) => setState(() => _query = v),
                   decoration: InputDecoration(
                     hintText: 'Search titles, authors, or topics',
-                    hintStyle: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: Palette.creamMuted),
+                    hintStyle: body?.copyWith(color: mutedColor),
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
@@ -267,13 +303,61 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     _searchController.clear();
                     setState(() => _query = '');
                   },
-                  child: const Padding(
-                    padding: EdgeInsets.only(left: 8),
-                    child: Icon(Icons.close,
-                        size: 20, color: Palette.creamMuted),
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Icon(Icons.close, size: 20, color: mutedColor),
                   ),
                 ),
             ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Where the search slot sits in the hero when the page is at the top
+  void _measureSlot() {
+    if (!mounted || !_scroll.hasClients) return;
+    final box = _slotKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached) return;
+    final top = box.localToGlobal(Offset.zero).dy + _scroll.offset;
+    if (_slotTop == null || (top - _slotTop!).abs() > 0.5) {
+      setState(() => _slotTop = top);
+    }
+  }
+
+  // Scrolls so the results heading sits just under the floating search
+  void _goToResults() {
+    final box = _resultsKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !_scroll.hasClients) return;
+    final y = box.localToGlobal(Offset.zero).dy;
+    final target = _scroll.offset + y - (_stickTop + _searchHeight + 8);
+    _scroll.animateTo(
+      target.clamp(0.0, _scroll.position.maxScrollExtent).toDouble(),
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  // The search field that rides over the page: follows the hero while the page
+  // is at the top, then stays stuck under the category bar.
+  Widget _buildFloatingSearch() {
+    return ListenableBuilder(
+      listenable: _scroll,
+      builder: (context, _) {
+        final slotTop = _slotTop;
+        if (slotTop == null) return const SizedBox.shrink();
+        final offset = _scroll.hasClients ? _scroll.offset : 0.0;
+        final natural = slotTop - offset;
+        final stuck = natural <= _stickTop;
+        return Positioned(
+          top: stuck ? _stickTop : natural,
+          left: 0,
+          right: 0,
+          child: AnimatedPadding(
+            duration: const Duration(milliseconds: 180),
+            padding: EdgeInsets.symmetric(horizontal: stuck ? 32 : 20),
+            child: _buildSearchField(stuck: stuck),
           ),
         );
       },
@@ -345,7 +429,35 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
     // Same four categories the web uses
     const categories = ['All', 'Fiction', 'Non-Fiction', 'Academic', 'Restricted'];
+    // Reset the sub-filter and page whenever the filters change (like the web)
+    if (_category != _lastCategory) {
+      _lastCategory = _category;
+      _sub = 'All';
+    }
+    final filterKey = '$_query|$_category|$_sub|$_availableOnly|${_sort.name}';
+    if (filterKey != _lastFilterKey) {
+      _lastFilterKey = filterKey;
+      _page = 1;
+    }
+
     final results = _results;
+
+    // Sub-categories of the selected category
+    final inCategory = _category == 'All'
+        ? <Book>[]
+        : _books.where((b) => b.category == _category).toList();
+    final subs = {
+      for (final b in inCategory)
+        if (b.subcategory.isNotEmpty) b.subcategory,
+    }.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+    // Pagination
+    final totalPages =
+        results.isEmpty ? 1 : (results.length / _pageSize).ceil();
+    final page = _page.clamp(1, totalPages).toInt();
+    final pageItems =
+        results.skip((page - 1) * _pageSize).take(_pageSize).toList();
     final text = Theme.of(context).textTheme;
 
     // Like the web: newest available books
@@ -364,10 +476,17 @@ class _ExploreScreenState extends State<ExploreScreen> {
             ? _category
             : 'All books';
 
-    return CustomScrollView(
+    // Measure where the search slot sits once the hero is laid out
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureSlot());
+
+    return Stack(
+      children: [
+        CustomScrollView(
+            controller: _scroll,
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             slivers: [
-              SliverToBoxAdapter(child: _buildHeader(context)),
+              SliverToBoxAdapter(child: _buildHeader(context, inlineSearch: false)),
+              
               // Category tabs stay pinned while the page scrolls
               SliverPersistentHeader(
                 pinned: true,
@@ -376,6 +495,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   child: _buildCategoryBar(categories),
                 ),
               ),
+
               // Discovery sections only show when nothing is filtered
               if (!_hasFilters) ...[
                 SliverToBoxAdapter(
@@ -422,6 +542,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
               // Results header: heading, count, availability, sort
               SliverToBoxAdapter(
                 child: Padding(
+                  key: _resultsKey,
                   padding: const EdgeInsets.fromLTRB(20, 28, 20, 4),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -513,6 +634,32 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
               ),
 
+              // Sub-category chips, only when a category is selected
+              if (subs.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final s in ['All', ...subs])
+                          _CategoryPill(
+                            label: s,
+                            count: s == 'All'
+                                ? inCategory.length
+                                : inCategory
+                                    .where((b) => b.subcategory == s)
+                                    .length,
+                            color: categoryChipColor(_category),
+                            selected: _sub == s,
+                            onTap: () => setState(() => _sub = s),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+
               if (results.isEmpty)
                 SliverFillRemaining(
                   hasScrollBody: false,
@@ -530,7 +677,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     builder: (context, constraints) {
                       const gap = 12.0;
                       const cols = 3;
-                      // Cover is always 2:3, text area gets a fixed height
                       final tileW =
                           (constraints.crossAxisExtent - gap * (cols - 1)) /
                               cols;
@@ -543,21 +689,148 @@ class _ExploreScreenState extends State<ExploreScreen> {
                         ),
                         delegate: SliverChildBuilderDelegate(
                           (context, i) => _BookCard(
-                            book: results[i],
-                            onTap: () => openBookDetails(context, results[i]),
+                            book: pageItems[i],
+                            onTap: () => openBookDetails(context, pageItems[i]),
                           ),
-                          childCount: results.length,
+                          childCount: pageItems.length,
                         ),
                       );
                     },
                   ),
                 ),
+              // Pagination + "Showing X of Y"
+              if (results.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: _Pagination(
+                            page: page,
+                            totalPages: totalPages,
+                            onChanged: (p) {
+                              setState(() => _page = p);
+                              WidgetsBinding.instance.addPostFrameCallback(
+                                  (_) => _goToResults());
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          'Showing ${pageItems.length} of ${results.length}',
+                          style: text.bodySmall
+                              ?.copyWith(color: Palette.textMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
+        ),
+        _buildFloatingSearch(),
+      ],
     );
   }
 }
 
 // Widgets
+
+List<Object> _pageNumbers(int page, int total) {
+  if (total <= 7) return [for (var i = 1; i <= total; i++) i];
+  final shown = {1, total, page - 1, page, page + 1}
+      .where((p) => p >= 1 && p <= total)
+      .toList()
+    ..sort();
+  final out = <Object>[];
+  for (var i = 0; i < shown.length; i++) {
+    if (i > 0 && shown[i] - shown[i - 1] > 1) out.add('…');
+    out.add(shown[i]);
+  }
+  return out;
+}
+
+class _Pagination extends StatelessWidget {
+  const _Pagination({
+    required this.page,
+    required this.totalPages,
+    required this.onChanged,
+  });
+
+  final int page;
+  final int totalPages;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    if (totalPages <= 1) return const SizedBox.shrink();
+
+    Widget cell({
+      required Widget child,
+      VoidCallback? onTap,
+      bool selected = false,
+    }) {
+      return Opacity(
+        opacity: onTap == null && !selected ? 0.4 : 1,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: selected ? Palette.burgundy : Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected ? Palette.burgundy : const Color(0xFF9CA3AF),
+              ),
+            ),
+            child: child,
+          ),
+        ),
+      );
+    }
+
+    return Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 4,
+      runSpacing: 6,
+      children: [
+        cell(
+          onTap: page > 1 ? () => onChanged(page - 1) : null,
+          child: const Icon(Icons.chevron_left,
+              size: 18, color: Palette.textDark),
+        ),
+        for (final p in _pageNumbers(page, totalPages))
+          if (p is int)
+            cell(
+              selected: p == page,
+              onTap: () => onChanged(p),
+              child: Text(
+                '$p',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: p == page ? FontWeight.w700 : FontWeight.w500,
+                  color: p == page ? Colors.white : Palette.textDark,
+                ),
+              ),
+            )
+          else
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 2),
+              child: Text('…', style: TextStyle(color: Palette.textMuted)),
+            ),
+        cell(
+          onTap: page < totalPages ? () => onChanged(page + 1) : null,
+          child: const Icon(Icons.chevron_right,
+              size: 18, color: Palette.textDark),
+        ),
+      ],
+    );
+  }
+}
 
 class _PinnedBarDelegate extends SliverPersistentHeaderDelegate {
   _PinnedBarDelegate({required this.child, required this.height});
@@ -579,7 +852,7 @@ class _PinnedBarDelegate extends SliverPersistentHeaderDelegate {
       old.child != child || old.height != height;
 }
 
-/// Gentle fade + rise when a section first appears.
+// Gentle fade + rise when a section first appears
 class _FadeSlide extends StatelessWidget {
   const _FadeSlide({required this.child});
   final Widget child;
@@ -781,7 +1054,7 @@ class _Shelf extends StatelessWidget {
   }
 }
 
-/// "Featured this week" card with a glowing backdrop behind the cover.
+// "Featured this week" card with a glowing backdrop behind the cover
 class _Spotlight extends StatelessWidget {
   const _Spotlight({required this.book, required this.onView});
 
@@ -885,7 +1158,7 @@ class _Spotlight extends StatelessWidget {
   }
 }
 
-/// Burgundy call-to-action banner (mirrors the web promo).
+// Burgundy call-to-action banner (mirrors the web promo)
 class _PromoBanner extends StatelessWidget {
   const _PromoBanner({required this.onAction});
   final VoidCallback onAction;
@@ -1052,7 +1325,7 @@ class _BookCard extends StatelessWidget {
   }
 }
 
-/// Compact status marker for small covers (icon only).
+// Compact status marker for small covers (icon only)
 class _StatusDot extends StatelessWidget {
   const _StatusDot({required this.book});
   final Book book;
@@ -1075,7 +1348,7 @@ class _StatusDot extends StatelessWidget {
   }
 }
 
-// Solid status pill laid over a cover.
+// Solid status pill laid over a cover
 class _StatusBadge extends StatelessWidget {
   const _StatusBadge({required this.book});
   final Book book;
