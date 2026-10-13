@@ -48,6 +48,7 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
     _argsRead = true;
     final args = ModalRoute.of(context)?.settings.arguments;
     if (args == 'pending') _filter = _Filter.pending;
+    if (args == 'history') _filter = _Filter.history;
   }
 
   @override
@@ -68,7 +69,8 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
               _Filter.current: store.current.length,
               _Filter.pending: pendingReqs.length,
               _Filter.overdue: store.overdue.length,
-              _Filter.history: store.history.length,
+              _Filter.history:
+                  store.history.length + store.myDeclinedRequests.length,
             };
             final activeCount = store.items.length;
             final overdueCount = store.overdue.length;
@@ -96,6 +98,25 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
                         key: ValueKey(pendingReqs[i].id),
                         request: pendingReqs[i],
                       ),
+                    );
+            } else if (_filter == _Filter.history) {
+              // returned loans + declined requests, newest first
+              final entries = <(DateTime, Widget)>[
+                for (final l in store.history)
+                  (l.returnedOn!, _LoanCard(key: ValueKey('l${l.txId}'), loan: l)),
+                for (final d in store.myDeclinedRequests)
+                  (
+                    d.decidedOn ?? d.requestedOn,
+                    _DeclinedCard(key: ValueKey('d${d.id}'), request: d)
+                  ),
+              ]..sort((a, b) => b.$1.compareTo(a.$1));
+              list = entries.isEmpty
+                  ? _EmptyState(filter: _filter)
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                      itemCount: entries.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 14),
+                      itemBuilder: (context, i) => entries[i].$2,
                     );
             } else {
               final loans = switch (_filter) {
@@ -161,7 +182,12 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
                                   selected: f == _filter,
                                   alert: f == _Filter.overdue &&
                                       counts[f]! > 0,
-                                  onTap: () => setState(() => _filter = f),
+                                  onTap: () {
+                                    setState(() => _filter = f);
+                                    if (f == _Filter.history) {
+                                      BorrowStore.instance.markDeclinedSeen();
+                                    }
+                                  },
                                 ),
                               ),
                           ],
@@ -404,6 +430,111 @@ class _RequestCard extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Declined request card
+
+class _DeclinedCard extends StatelessWidget {
+  const _DeclinedCard({super.key, required this.request});
+  final BorrowRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final book = request.book;
+    final text = Theme.of(context).textTheme;
+    final red = Colors.red.shade700;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Palette.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x2655161D)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _MiniCover(book: book),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: red.withAlpha(31),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text('DECLINED',
+                            style: text.labelSmall?.copyWith(
+                              color: red,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            )),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(book.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: Palette.textDark,
+                          )),
+                      const SizedBox(height: 2),
+                      Text(book.author,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.bodyMedium
+                              ?.copyWith(color: Palette.textMuted)),
+                      const SizedBox(height: 10),
+                      Text(
+                          'Declined ${_fmt(request.decidedOn ?? request.requestedOn)}',
+                          style: text.bodySmall?.copyWith(
+                            color: red,
+                            fontWeight: FontWeight.w600,
+                          )),
+                      const SizedBox(height: 2),
+                      Text('Requested ${_fmt(request.requestedOn)}',
+                          style: text.bodySmall
+                              ?.copyWith(color: Palette.textMuted)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => openBookDetails(context, book),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Palette.burgundy,
+                  side: const BorderSide(color: Palette.burgundy),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('View Details'),
+              ),
             ),
           ],
         ),

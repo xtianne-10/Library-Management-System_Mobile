@@ -139,6 +139,26 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
 
+            // Declined requests (until the borrower opens or dismisses them)
+            ListenableBuilder(
+              listenable: BorrowStore.instance,
+              builder: (context, _) {
+                final declined = BorrowStore.instance.unseenDeclined;
+                if (declined.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                  child: _DeclinedBanner(
+                    requests: declined,
+                    onTap: () {
+                      BorrowStore.instance.markDeclinedSeen();
+                      _goMyBooks(tab: 'history');
+                    },
+                    onDismiss: BorrowStore.instance.markDeclinedSeen,
+                  ),
+                );
+              },
+            ),
+
             // Pending requests shortcut (only when there are some)
             ListenableBuilder(
               listenable: BorrowStore.instance,
@@ -550,6 +570,64 @@ class _PendingBanner extends StatelessWidget {
                 ),
               ),
               const Icon(Icons.chevron_right, color: Palette.burgundy),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Declined requests notice
+
+class _DeclinedBanner extends StatelessWidget {
+  const _DeclinedBanner({
+    required this.requests,
+    required this.onTap,
+    required this.onDismiss,
+  });
+
+  final List<BorrowRequest> requests;
+  final VoidCallback onTap;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final red = Colors.red.shade700;
+    final message = requests.length == 1
+        ? 'Your request for "${requests.first.book.title}" was declined'
+        : '${requests.length} of your requests were declined';
+
+    return Material(
+      color: red.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 8, 4, 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: red.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.cancel_outlined, size: 22, color: red),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(message,
+                    style: text.bodyMedium?.copyWith(
+                      color: Palette.textDark,
+                      fontWeight: FontWeight.w600,
+                    )),
+              ),
+              IconButton(
+                tooltip: 'Dismiss',
+                onPressed: onDismiss,
+                icon: const Icon(Icons.close, size: 18),
+                color: Palette.textMuted,
+              ),
             ],
           ),
         ),

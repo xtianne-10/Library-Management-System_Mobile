@@ -707,6 +707,19 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           ),
         ],
       ),
+      if (u?.isHead ?? false) ...[
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _addLibrarian,
+          icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
+          label: const Text('Add librarian'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Palette.burgundy,
+            side: const BorderSide(color: Palette.burgundy),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+        ),
+      ],
       const SizedBox(height: 12),
       OutlinedButton.icon(
         onPressed: _confirmLogout,
@@ -928,6 +941,115 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     cur.dispose();
     next.dispose();
     conf.dispose();
+  }
+
+  Future<void> _addLibrarian() async {
+    final first = TextEditingController();
+    final last = TextEditingController();
+    final id = TextEditingController();
+    final email = TextEditingController();
+    final phone = TextEditingController();
+    final pass = TextEditingController();
+    final key = GlobalKey<FormState>();
+    const auto = AutovalidateMode.onUserInteraction;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Add Librarian'),
+        content: SingleChildScrollView(
+          child: Form(
+            key: key,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'They will be asked to change this temporary password on first login.',
+                  style: TextStyle(fontSize: 12, color: Palette.textMuted),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: first,
+                  decoration: _fieldDec(label: 'First name'),
+                  validator: (v) => Validators.name(v, 'First name'),
+                  autovalidateMode: auto,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: last,
+                  decoration: _fieldDec(label: 'Last name'),
+                  validator: (v) => Validators.name(v, 'Last name'),
+                  autovalidateMode: auto,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: id,
+                  decoration: _fieldDec(label: 'Employee ID'),
+                  validator: (v) => Validators.idNumber(v, 'Employee ID'),
+                  autovalidateMode: auto,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: email,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: _fieldDec(label: 'Faculty email'),
+                  validator: Validators.email,
+                  autovalidateMode: auto,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: phone,
+                  keyboardType: TextInputType.phone,
+                  decoration: _fieldDec(label: 'Phone number (optional)'),
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? null
+                      : Validators.phone(v),
+                  autovalidateMode: auto,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: pass,
+                  obscureText: true,
+                  decoration: _fieldDec(label: 'Temporary password'),
+                  validator: Validators.password,
+                  autovalidateMode: auto,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              if (key.currentState!.validate()) Navigator.pop(c, true);
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok == true) {
+      final err = await AuthService.instance.addLibrarian(
+        firstName: first.text,
+        lastName: last.text,
+        idNumber: id.text,
+        email: email.text,
+        phone: phone.text.replaceAll(RegExp(r'[\s-]'), ''),
+        password: pass.text,
+      );
+      if (!mounted) return;
+      _snack(err ?? 'Librarian account created.');
+    }
+    first.dispose();
+    last.dispose();
+    id.dispose();
+    email.dispose();
+    phone.dispose();
+    pass.dispose();
   }
 
   Widget _header() {
@@ -3479,6 +3601,7 @@ class _RequestsScreenState extends State<_RequestsScreen> {
   final _lib = LibraryService.instance;
   final Set<int> _busy = {};
   int _page = 0;
+  String _query = '';
 
   @override
   void initState() {
@@ -3518,7 +3641,16 @@ class _RequestsScreenState extends State<_RequestsScreen> {
       body: ListenableBuilder(
         listenable: _lib,
         builder: (context, _) {
-          final reqs = _lib.pendingRequests;
+          final all = _lib.pendingRequests;
+          final q = _query.trim().toLowerCase();
+          final reqs = q.isEmpty
+              ? all
+              : all
+                  .where((r) =>
+                      r.book.title.toLowerCase().contains(q) ||
+                      r.borrower.toLowerCase().contains(q) ||
+                      r.borrowerEmail.toLowerCase().contains(q))
+                  .toList();
           final pages = (reqs.length / _size).ceil();
           final page = pages <= 1 ? 0 : _page.clamp(0, pages - 1);
           final start = page * _size;
@@ -3528,16 +3660,34 @@ class _RequestsScreenState extends State<_RequestsScreen> {
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
             children: [
               Text(
-                reqs.isEmpty
+                all.isEmpty
                     ? 'No requests waiting for approval.'
-                    : '${reqs.length} ${reqs.length == 1 ? 'request' : 'requests'} waiting for approval',
+                    : q.isEmpty
+                        ? '${all.length} ${all.length == 1 ? 'request' : 'requests'} waiting for approval'
+                        : '${reqs.length} of ${all.length} requests match',
                 style: const TextStyle(color: Palette.textMuted),
               ),
               const SizedBox(height: 14),
-              if (reqs.isEmpty)
+              if (all.isNotEmpty) ...[
+                TextField(
+                  onChanged: (v) => setState(() {
+                    _query = v;
+                    _page = 0;
+                  }),
+                  decoration: _fieldDec(
+                      hint: 'Search by book, name, or email',
+                      prefix: const Icon(Icons.search)),
+                ),
+                const SizedBox(height: 14),
+              ],
+              if (all.isEmpty)
                 const _EmptyNote(
                     icon: Icons.verified_outlined,
                     text: 'You\'re all caught up.')
+              else if (reqs.isEmpty)
+                const _EmptyNote(
+                    icon: Icons.search_off,
+                    text: 'No requests match your search.')
               else ...[
                 for (final r in reqs.sublist(start, end))
                   _RequestCard(

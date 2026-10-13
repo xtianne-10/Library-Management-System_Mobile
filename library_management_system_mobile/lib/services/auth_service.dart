@@ -38,6 +38,7 @@ AppUser _userFromJson(Map u) => AppUser(
       avatar: _decodeAvatar(u['avatar']),
       password: '',
       role: UserRole.values.asNameMap()[u['role']] ?? UserRole.student,
+      isHead: u['isHead'] == true,
     );
 
 class AppUser {
@@ -55,6 +56,7 @@ class AppUser {
     this.yearLevel = '',
     this.department = '',
     this.assignedRole = '',
+    this.isHead = false,
   });
 
   final String firstName;
@@ -72,6 +74,7 @@ class AppUser {
   final String yearLevel;
   final String department;
   final String assignedRole;
+  final bool isHead;
 
   String get fullName => '$firstName $lastName'.trim();
 
@@ -106,6 +109,7 @@ class AppUser {
         yearLevel: yearLevel ?? this.yearLevel,
         department: department ?? this.department,
         assignedRole: assignedRole ?? this.assignedRole,
+        isHead: isHead,
       );
 }
 
@@ -296,6 +300,43 @@ class AuthService extends ChangeNotifier {
     _current = updated;
     notifyListeners();
     return null;
+  }
+
+  /// Head librarian only. Returns an error message, or null on success.
+  Future<String?> addLibrarian({
+    required String firstName,
+    required String lastName,
+    required String idNumber,
+    required String email,
+    required String phone,
+    required String password,
+  }) async {
+    if (_token == null) return 'You are not signed in.';
+    try {
+      final res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/auth/librarians'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_token',
+        },
+        body: jsonEncode({
+          'firstName': firstName.trim(),
+          'lastName': lastName.trim(),
+          'idNumber': idNumber.trim(),
+          'email': _norm(email),
+          'phone_number': phone,
+          'password': password,
+        }),
+      );
+      if (res.statusCode == 201) return null;
+      Map? data;
+      try {
+        data = jsonDecode(res.body) as Map;
+      } catch (_) {}
+      return (data?['error'] as String?) ?? 'Could not create librarian.';
+    } catch (_) {
+      return 'Cannot reach the server.';
+    }
   }
 
   void logout() {

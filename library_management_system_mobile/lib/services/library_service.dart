@@ -91,6 +91,7 @@ class LoanRequest {
     required this.borrowerEmail,
     required this.requestedOn,
     required this.declined,
+    this.decidedOn,
   });
 
   final int id;
@@ -100,6 +101,7 @@ class LoanRequest {
   final String borrowerEmail;
   final DateTime requestedOn;
   final bool declined;
+  final DateTime? decidedOn;
 }
 
 /// Shared in-memory catalog + transactions (single source of truth).
@@ -199,6 +201,7 @@ class LibraryService extends ChangeNotifier {
                 DateTime.tryParse((r['requestedOn'] ?? '').toString()) ??
                     DateTime.now(),
             declined: state == 'declined',
+            decidedOn: DateTime.tryParse((r['decidedOn'] ?? '').toString()),
           ));
           continue;
         }

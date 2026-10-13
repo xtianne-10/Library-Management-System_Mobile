@@ -42,6 +42,7 @@ class BorrowRequest {
     required this.user,
     required this.email,
     required this.requestedOn,
+    this.decidedOn,
   });
 
   final int id;
@@ -49,6 +50,7 @@ class BorrowRequest {
   final dynamic user;
   final String email;
   final DateTime requestedOn;
+  final DateTime? decidedOn;
   RequestStatus status = RequestStatus.pending;
 }
 
@@ -135,6 +137,40 @@ class BorrowStore extends ChangeNotifier {
       .where((r) => !r.declined)
       .map(_asRequest)
       .toList();
+
+  // Borrower: requests a librarian turned down, newest first
+  List<BorrowRequest> get myDeclinedRequests {
+    final list = LibraryService.instance
+        .requestsOf(_myEmail)
+        .where((r) => r.declined)
+        .map((r) => BorrowRequest(
+              id: r.id,
+              book: r.book,
+              user: null,
+              email: r.borrowerEmail,
+              requestedOn: r.requestedOn,
+              decidedOn: r.decidedOn,
+            )..status = RequestStatus.declined)
+        .toList();
+    list.sort((a, b) =>
+        (b.decidedOn ?? b.requestedOn).compareTo(a.decidedOn ?? a.requestedOn));
+    return list;
+  }
+
+  // Declines the borrower hasn't been told about yet this session.
+  // Only recent ones (3 days), so old declines don't pop up on every app start.
+  final Set<int> _seenDeclined = {};
+
+  List<BorrowRequest> get unseenDeclined => myDeclinedRequests
+      .where((r) =>
+          !_seenDeclined.contains(r.id) &&
+          DateTime.now().difference(r.decidedOn ?? r.requestedOn).inDays < 3)
+      .toList();
+
+  void markDeclinedSeen() {
+    _seenDeclined.addAll(myDeclinedRequests.map((r) => r.id));
+    notifyListeners();
+  }
 
   // Borrower: withdraw a pending request. Returns an error message, or null
   Future<String?> cancelRequest(BorrowRequest r) =>
