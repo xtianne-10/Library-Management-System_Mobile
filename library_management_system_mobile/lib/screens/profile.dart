@@ -39,6 +39,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadFromUser();
+    AuthService.instance.refresh().then((_) {
+      if (mounted && !_editing) setState(_loadFromUser);
+    });
     if (!AuthService.instance.isLoggedIn) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.pushReplacementNamed(context, '/login');

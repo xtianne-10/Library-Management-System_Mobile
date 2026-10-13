@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show rootBundle;
 class Book {
   const Book({
     this.id = 0,
+    this.remoteId = '',
     required this.title,
     required this.author,
     required this.category,
@@ -24,6 +25,7 @@ class Book {
   });
 
   final int id;
+  final String remoteId; // server (MongoDB) id
   final String title;
   final String author;
   final String category;
@@ -44,6 +46,7 @@ class Book {
 
   Book copyWith({
     int? id,
+    String? remoteId,
     String? title,
     String? author,
     String? category,
@@ -58,6 +61,7 @@ class Book {
   }) =>
       Book(
         id: id ?? this.id,
+        remoteId: remoteId ?? this.remoteId,
         title: title ?? this.title,
         author: author ?? this.author,
         category: category ?? this.category,
@@ -74,6 +78,58 @@ class Book {
         imageUrl: imageUrl ?? this.imageUrl,
         imageBytes: clearImageBytes ? null : (imageBytes ?? this.imageBytes),
       );
+
+  /// Same fields the web uses: id, title, author, publisher, category,
+  /// published (YYYY-MM-DD), description, image, cover, copies.
+  factory Book.fromServer(Map<String, dynamic> j, {required int localId}) {
+    final img = (j['image'] as String?) ?? '';
+    Uint8List? bytes;
+    if (img.startsWith('data:')) {
+      try {
+        bytes = base64Decode(img.substring(img.indexOf(',') + 1));
+      } catch (_) {}
+    }
+    var color = const Color(0xFF55161D);
+    final cover = j['cover'];
+    if (cover is List && cover.isNotEmpty) {
+      try {
+        color = _hexToColor(cover.first as String);
+      } catch (_) {}
+    }
+    final copies = (j['copies'] as num?)?.toInt() ?? 1;
+    return Book(
+      id: localId,
+      remoteId: (j['id'] ?? '').toString(),
+      title: (j['title'] ?? '') as String,
+      author: (j['author'] ?? '') as String,
+      category: (j['category'] ?? '') as String,
+      color: color,
+      description: (j['description'] ?? '') as String,
+      publisher: (j['publisher'] ?? '') as String,
+      published: DateTime.tryParse((j['published'] ?? '') as String),
+      totalCopies: copies,
+      copiesAvailable: copies,
+      imageUrl: bytes == null && !img.startsWith('data:') ? img : '',
+      imageBytes: bytes,
+    );
+  }
+
+  Map<String, dynamic> toServer() {
+    String two(int n) => n.toString().padLeft(2, '0');
+    final p = published;
+    return {
+      'title': title,
+      'author': author,
+      'publisher': publisher,
+      'category': category,
+      'published': p == null ? '' : '${p.year}-${two(p.month)}-${two(p.day)}',
+      'description': description,
+      'image': imageBytes != null
+          ? 'data:image/jpeg;base64,${base64Encode(imageBytes!)}'
+          : imageUrl,
+      'copies': totalCopies,
+    };
+  }
 
   factory Book.fromJson(Map<String, dynamic> json) => Book(
         id: json['id'] as int,

@@ -7,6 +7,39 @@ import '../config/api_config.dart';
 
 enum UserRole { student, professor, librarian }
 
+String _s(Map u, List<String> keys) {
+  for (final k in keys) {
+    final v = u[k];
+    if (v != null && v.toString().isNotEmpty) return v.toString();
+  }
+  return '';
+}
+
+Uint8List? _decodeAvatar(dynamic v) {
+  if (v is! String || v.isEmpty) return null;
+  try {
+    final i = v.indexOf(',');
+    return base64Decode(i == -1 ? v : v.substring(i + 1));
+  } catch (_) {
+    return null;
+  }
+}
+
+AppUser _userFromJson(Map u) => AppUser(
+      firstName: _s(u, ['firstName', 'first_name']),
+      lastName: _s(u, ['lastName', 'last_name']),
+      email: _s(u, ['email']),
+      phone: _s(u, ['phone_number', 'phone']),
+      idNumber: _s(u, ['idNumber', 'id_number', 'employeeId', 'employee_id']),
+      course: _s(u, ['course']),
+      yearLevel: _s(u, ['yearLevel', 'year_level']),
+      department: _s(u, ['department']),
+      assignedRole: _s(u, ['assignedRole', 'assigned_role']),
+      avatar: _decodeAvatar(u['avatar']),
+      password: '',
+      role: UserRole.values.asNameMap()[u['role']] ?? UserRole.student,
+    );
+
 class AppUser {
   const AppUser({
     required this.firstName,
@@ -122,10 +155,32 @@ class AuthService extends ChangeNotifier {
   List<AppUser> get students =>
       _users.where((u) => u.role == UserRole.student).toList();
 
-  /// Students and professors (everyone who can borrow).
-  List<AppUser> get borrowers => _users
-      .where((u) => u.role == UserRole.student || u.role == UserRole.professor)
-      .toList();
+  List<AppUser> _remoteBorrowers = [];
+  bool _borrowersLoaded = false;
+
+  /// Students and professors (everyone who can borrow). Comes from the
+  /// server once loaded, otherwise the demo users.
+  List<AppUser> get borrowers => _borrowersLoaded
+      ? _remoteBorrowers
+      : _users
+          .where((u) =>
+              u.role == UserRole.student || u.role == UserRole.professor)
+          .toList();
+
+  Future<void> loadBorrowers() async {
+    if (_token == null) return;
+    try {
+      final res = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/borrowings/borrowers'),
+        headers: {'Authorization': 'Bearer $_token'},
+      );
+      if (res.statusCode != 200) return;
+      final list = jsonDecode(res.body) as List;
+      _remoteBorrowers = [for (final m in list) _userFromJson(m as Map)];
+      _borrowersLoaded = true;
+      notifyListeners();
+    } catch (_) {}
+  }
 
   String _norm(String email) => email.trim().toLowerCase();
 
@@ -167,18 +222,7 @@ class AuthService extends ChangeNotifier {
       }
       final u = data['user'];
       _token = data['token'];
-      _current = AppUser(
-        firstName: u['firstName'] ?? '',
-        lastName: u['lastName'] ?? '',
-        email: u['email'] ?? '',
-        phone: u['phone_number'] ?? '',
-        idNumber: u['idNumber'] ?? '',
-        course: u['course'] ?? '',
-        yearLevel: u['yearLevel'] ?? '',
-        department: u['department'] ?? '',
-        password: '',
-        role: UserRole.values.asNameMap()[u['role']] ?? UserRole.student,
-      );
+      _current = _userFromJson(u);
       notifyListeners();
       return null;
     } catch (_) {
@@ -233,7 +277,37 @@ class AuthService extends ChangeNotifier {
   void logout() {
     _current = null;
     _token = null;
+    _remoteBorrowers = [];
+    _borrowersLoaded = false;
     notifyListeners();
+  }
+
+  /// Re-reads the profile from the server so web edits show up here.
+  Future<void> refresh() async {
+    if (_token == null) return;
+    try {
+      final res = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/auth/me'),
+        headers: {'Authorization': 'Bearer $_token'},
+      );
+      if (res.statusCode != 200) return;
+      _current = _userFromJson(jsonDecode(res.body)['user']);
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> _pushProfile(Map<String, dynamic> body) async {
+    if (_token == null) return;
+    try {
+      await http.put(
+        Uri.parse('${ApiConfig.baseUrl}/auth/me'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_token',
+        },
+        body: jsonEncode(body),
+      );
+    } catch (_) {}
   }
 
   void updateAvatar(Uint8List? bytes) {
@@ -244,6 +318,10 @@ class AuthService extends ChangeNotifier {
     if (i != -1) _users[i] = updated;
     _current = updated;
     notifyListeners();
+    _pushProfile({
+      'avatar':
+          bytes == null ? null : 'data:image/jpeg;base64,${base64Encode(bytes)}',
+    });
   }
 
   String? updateProfile({
@@ -278,6 +356,17 @@ class AuthService extends ChangeNotifier {
     if (i != -1) _users[i] = updated;
     _current = updated;
     notifyListeners();
+    _pushProfile({
+      'firstName': updated.firstName,
+      'lastName': updated.lastName,
+      'email': updated.email,
+      'phone_number': updated.phone,
+      'idNumber': updated.idNumber,
+      'course': updated.course,
+      'yearLevel': updated.yearLevel,
+      'department': updated.department,
+      'assignedRole': updated.assignedRole,
+    });
     return null;
   }
 }

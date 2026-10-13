@@ -12,10 +12,7 @@ import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/utils/validators.dart';
 
-const _categories = [
-  'Fiction', 'Non-Fiction', 'Science Fiction', 'Fantasy',
-  'Mystery', 'Biography', 'History', 'Science',
-];
+const _categories = ['Fiction', 'Non-Fiction', 'Academic', 'Restricted'];
 
 const _months = [
   'January', 'February', 'March', 'April', 'May', 'June', 'July',
@@ -193,6 +190,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     }
     _lib.addListener(_refresh);
     _lib.ensureLoaded();
+    AuthService.instance.refresh().then((_) => _refresh());
   }
 
   void _refresh() {
@@ -247,7 +245,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       return;
     }
     try {
-      book == null ? _lib.add(result) : _lib.update(result);
+      book == null ? await _lib.add(result) : await _lib.update(result);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(book == null ? 'Book added.' : 'Book updated.')));
@@ -315,7 +313,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       ),
     );
     if (ok == true) {
-      final err = _lib.remove(b.id);
+      final err = await _lib.remove(b.id);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(err ?? 'Book deleted.')));
@@ -565,8 +563,11 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   }
 
   // Swap for the real field once AppUser has employeeId.
-  String _employeeId(AppUser? u) =>
-      (u?.employeeId.isNotEmpty ?? false) ? u!.employeeId : '-';
+  String _employeeId(AppUser? u) {
+    if (u == null) return '-';
+    if (u.idNumber.isNotEmpty) return u.idNumber;
+    return u.employeeId.isNotEmpty ? u.employeeId : '-';
+  }
 
   Widget _infoRow(IconData icon, String label, String value) => ListTile(
         dense: true,
@@ -651,6 +652,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
             _infoRow(Icons.person_outline, 'Full name', u?.fullName ?? ''),
             _infoRow(Icons.numbers, 'Employee ID', _employeeId(u)),
             _infoRow(Icons.email_outlined, 'Faculty email', u?.email ?? ''),
+            _infoRow(Icons.phone_outlined, 'Phone number', u?.phone ?? ''),
             _infoRow(Icons.shield_outlined, 'Assigned role',
                 (u?.assignedRole.isNotEmpty ?? false) ? u!.assignedRole : 'Librarian'),
           ],
@@ -964,9 +966,10 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     );
   }
 
-  void _returnTx(BookTransaction t) {
+  Future<void> _returnTx(BookTransaction t) async {
     final fine = t.fine;
-    final err = _lib.returnBook(t.id);
+    final err = await _lib.returnBook(t.id);
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(err ??
           (fine > 0
@@ -1029,7 +1032,11 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       ),
       bottomNavigationBar: _LibNavBar(
         index: _tab,
-        onChanged: (i) => setState(() => _tab = i),
+        onChanged: (i) {
+          setState(() => _tab = i);
+          if (i == 3) AuthService.instance.refresh().then((_) => _refresh());
+          if (i != 3) _lib.reload();
+        },
         overdue: _lib.transactions.where((t) => t.overdue).length,
       ),
       floatingActionButton: _tab != 1 ? null : FloatingActionButton.extended(
@@ -1048,6 +1055,13 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           // ---- Catalog ----
           const _Section('Book Catalog', Icons.menu_book),
           const SizedBox(height: 10),
+          if (_lib.loadError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(_lib.loadError!,
+                  style: const TextStyle(
+                      color: Color(0xFFC0121F), fontWeight: FontWeight.w600)),
+            ),
           Row(
             children: [
               Expanded(
@@ -1594,8 +1608,9 @@ class _TxCard extends StatelessWidget {
               Align(
                 alignment: Alignment.centerRight,
                 child: FilledButton.tonal(
-                  onPressed: () {
-                    final err = LibraryService.instance.payFine(t.id);
+                  onPressed: () async {
+                    final err = await LibraryService.instance.payFine(t.id);
+                    if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                       content: Text(err ??
                           'Fine of ₱${t.fine.toStringAsFixed(2)} marked as paid.'),
@@ -1972,8 +1987,9 @@ class _IssueSheetState extends State<_IssueSheet> {
               width: double.infinity,
               child: FilledButton(
                 onPressed: ready
-                    ? () {
-                        final err = _lib.checkOut(book, student);
+                    ? () async {
+                        final err = await _lib.checkOut(book, student);
+                        if (!context.mounted) return;
                         Navigator.pop(
                           context,
                           err ??
@@ -2059,7 +2075,8 @@ class _BookFormState extends State<_BookForm> {
   }
 
   Future<void> _browse() async {
-    final f = await _picker.pickImage(source: ImageSource.gallery, maxWidth: 800);
+    final f = await _picker.pickImage(
+        source: ImageSource.gallery, maxWidth: 240, imageQuality: 70);
     if (f == null) return;
     final data = await f.readAsBytes();
     if (data.length > 2 * 1024 * 1024) {
@@ -2498,10 +2515,11 @@ class _ImportSheetState extends State<_ImportSheet> {
     });
   }
 
-  void _import() {
+  Future<void> _import() async {
     final books = _valid.map((r) => r.book!).toList();
-    final n = LibraryService.instance.addAll(books);
-    final skipped = _bad.length;
+    final n = await LibraryService.instance.addAll(books);
+    if (!mounted) return;
+    final skipped = _bad.length + (books.length - n);
     Navigator.pop(
       context,
       'Imported $n ${n == 1 ? 'book' : 'books'}'

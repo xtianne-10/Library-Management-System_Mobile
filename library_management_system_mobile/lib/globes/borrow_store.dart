@@ -158,10 +158,9 @@ class BorrowStore extends ChangeNotifier {
 
   // Librarian: approve. Returns an error message (request stays pending)
   // or null on success
-  String? approve(BorrowRequest r) {
-    final error =
-        LibraryService.instance.checkOut(r.book, r.user, borrowedOn: null);
-    if (error != null) return error.toString();
+  Future<String?> approve(BorrowRequest r) async {
+    final error = await LibraryService.instance.checkOut(r.book, r.user);
+    if (error != null) return error;
     _requests.remove(r);
     notifyListeners();
     return null;
@@ -174,20 +173,20 @@ class BorrowStore extends ChangeNotifier {
 
   bool isBorrowed(Book b) => _all.any((e) => !e.isReturned && e.book.id == b.id);
 
-  bool borrow(Book b, {DateTime? borrowedOn}) {
+  // borrowedOn is ignored now; the server sets the date
+  Future<bool> borrow(Book b, {DateTime? borrowedOn}) async {
     final user = AuthService.instance.currentUser;
     if (user == null) return false;
-    return LibraryService.instance.checkOut(b, user, borrowedOn: borrowedOn) ==
-        null;
+    return await LibraryService.instance.checkOut(b, user) == null;
   }
 
   int copiesLeft(Book b) => LibraryService.instance.copiesLeft(b);
 
   bool isAvailable(Book b) => copiesLeft(b) > 0;
 
-  void giveBack(Book b) {
+  Future<void> giveBack(Book b) async {
     final user = AuthService.instance.currentUser;
     if (user == null) return;
-    LibraryService.instance.returnLatest(b, user.email);
+    await LibraryService.instance.returnLatest(b, user.email);
   }
 }

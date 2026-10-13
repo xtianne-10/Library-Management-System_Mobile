@@ -2,12 +2,15 @@ import 'package:flutter/foundation.dart';
 
 import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/services/auth_service.dart';
+import 'package:library_management_system_mobile/services/book_api.dart';
+import 'package:library_management_system_mobile/services/borrow_api.dart';
 
 DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
 class BookTransaction {
   const BookTransaction({
     required this.id,
+    this.remoteId = '',
     required this.bookId,
     required this.book,
     required this.title,
@@ -20,6 +23,7 @@ class BookTransaction {
   });
 
   final int id;
+  final String remoteId; // server id
   final int bookId;
   final Book book;
   final String title;
@@ -44,44 +48,29 @@ class BookTransaction {
   double get fineOwed => finePaid ? 0 : fine;
   String get status => returned ? 'Returned' : 'Not Returned';
 
-  BookTransaction markReturned(DateTime when) => BookTransaction(
+  BookTransaction _copy({
+    Book? book,
+    String? title,
+    DateTime? returnedOn,
+    bool? finePaid,
+  }) =>
+      BookTransaction(
         id: id,
+        remoteId: remoteId,
         bookId: bookId,
-        book: book,
-        title: title,
+        book: book ?? this.book,
+        title: title ?? this.title,
         borrower: borrower,
         borrowerEmail: borrowerEmail,
         borrowedOn: borrowedOn,
         due: due,
-        returnedOn: when,
-        finePaid: finePaid,
+        returnedOn: returnedOn ?? this.returnedOn,
+        finePaid: finePaid ?? this.finePaid,
       );
 
-  BookTransaction withBook(Book b) => BookTransaction(
-        id: id,
-        bookId: bookId,
-        book: b,
-        title: b.title,
-        borrower: borrower,
-        borrowerEmail: borrowerEmail,
-        borrowedOn: borrowedOn,
-        due: due,
-        returnedOn: returnedOn,
-        finePaid: finePaid,
-      );
-
-  BookTransaction markFinePaid() => BookTransaction(
-        id: id,
-        bookId: bookId,
-        book: book,
-        title: title,
-        borrower: borrower,
-        borrowerEmail: borrowerEmail,
-        borrowedOn: borrowedOn,
-        due: due,
-        returnedOn: returnedOn,
-        finePaid: true,
-      );
+  BookTransaction markReturned(DateTime when) => _copy(returnedOn: when);
+  BookTransaction withBook(Book b) => _copy(book: b, title: b.title);
+  BookTransaction markFinePaid() => _copy(finePaid: true);
 }
 
 /// Shared in-memory catalog + transactions (single source of truth).
@@ -101,53 +90,123 @@ class LibraryService extends ChangeNotifier {
   List<Book> get books => List.unmodifiable(_books);
   List<BookTransaction> get transactions => List.unmodifiable(_transactions);
 
+  final Map<String, int> _idMap = {}; // server id -> stable local int id
+  int _nextLocalId = 1;
+  String? loadError;
+
+  int _idFor(String remoteId) =>
+      _idMap.putIfAbsent(remoteId, () => _nextLocalId++);
+
+  Book _fromServer(Map<String, dynamic> j) =>
+      Book.fromServer(j, localId: _idFor((j['id'] ?? '').toString()));
+
   Future<List<Book>> ensureLoaded() async {
-    if (!_loaded) {
+    if (!_loaded) await reload();
+    return books;
+  }
+
+  final Map<String, int> _txIdMap = {};
+  int _txIdFor(String remoteId) =>
+      _txIdMap.putIfAbsent(remoteId, () => _nextTxId++);
+
+  /// Re-reads the catalog and transactions so web changes show up here.
+  Future<void> reload() async {
+    try {
+      final list = await BookApi.list();
       _books
         ..clear()
-        ..addAll(await BookRepository.loadBooks());
+        ..addAll(list.map(_fromServer));
       _loaded = true;
-      notifyListeners();
+      loadError = null;
+    } catch (e) {
+      loadError = e.toString().replaceFirst('Exception: ', '');
     }
-    return books;
+    await _loadTransactions();
+    notifyListeners();
+  }
+
+  Future<void> _loadTransactions() async {
+    try {
+      final rows = await BorrowApi.list();
+      final byRemote = {for (final b in _books) b.remoteId: b};
+      final out = <BookTransaction>[];
+      for (final r in rows) {
+        final book = byRemote[(r['bookId'] ?? '').toString()];
+        if (book == null) continue;
+        final rid = (r['id'] ?? '').toString();
+        out.add(BookTransaction(
+          id: _txIdFor(rid),
+          remoteId: rid,
+          bookId: book.id,
+          book: book,
+          title: book.title,
+          borrower: (r['borrower'] ?? '') as String,
+          borrowerEmail: ((r['borrowerEmail'] ?? '') as String).toLowerCase(),
+          borrowedOn: DateTime.parse(r['borrowedOn'] as String),
+          due: DateTime.parse(r['due'] as String),
+          returnedOn: r['returned'] == null
+              ? null
+              : DateTime.parse(r['returned'] as String),
+          finePaid: r['finePaid'] == true,
+        ));
+      }
+      _transactions
+        ..clear()
+        ..addAll(out);
+      if (AuthService.instance.currentUser?.role == UserRole.librarian) {
+        await AuthService.instance.loadBorrowers();
+      }
+    } catch (_) {}
   }
 
   // ---- Catalog ----
 
-  void add(Book b) {
-    final nextId = _books.fold<int>(0, (m, x) => x.id > m ? x.id : m) + 1;
-    _books.add(b.copyWith(id: nextId));
+  /// Throws if the server rejects the book.
+  Future<void> add(Book b) async {
+    final saved = _fromServer(await BookApi.create(b.toServer()));
+    _books.add(saved);
     notifyListeners();
   }
 
-  /// Adds many books at once. Returns how many were added.
-  int addAll(List<Book> list) {
-    var nextId = _books.fold<int>(0, (m, x) => x.id > m ? x.id : m) + 1;
+  /// Adds many books at once. Returns how many the server accepted.
+  Future<int> addAll(List<Book> list) async {
+    var n = 0;
     for (final b in list) {
-      _books.add(b.copyWith(id: nextId++));
+      try {
+        _books.add(_fromServer(await BookApi.create(b.toServer())));
+        n++;
+      } catch (_) {}
     }
-    if (list.isNotEmpty) notifyListeners();
-    return list.length;
+    if (n > 0) notifyListeners();
+    return n;
   }
 
-  void update(Book b) {
+  Future<void> update(Book b) async {
     final i = _books.indexWhere((x) => x.id == b.id);
-    if (i == -1) return;
-    _books[i] = b;
+    if (i == -1 || b.remoteId.isEmpty) return;
+    final saved = _fromServer(await BookApi.update(b.remoteId, b.toServer()));
+    _books[i] = saved;
     for (var k = 0; k < _transactions.length; k++) {
-      if (_transactions[k].bookId == b.id) {
-        _transactions[k] = _transactions[k].withBook(b);
+      if (_transactions[k].bookId == saved.id) {
+        _transactions[k] = _transactions[k].withBook(saved);
       }
     }
     notifyListeners();
   }
 
   /// Returns an error message, or null on success.
-  String? remove(int id) {
+  Future<String?> remove(int id) async {
     if (_transactions.any((t) => !t.returned && t.bookId == id)) {
       return 'This book is currently borrowed and can\'t be deleted.';
     }
-    _books.removeWhere((x) => x.id == id);
+    final i = _books.indexWhere((x) => x.id == id);
+    if (i == -1) return 'Book not found.';
+    try {
+      await BookApi.remove(_books[i].remoteId);
+    } catch (e) {
+      return e.toString().replaceFirst('Exception: ', '');
+    }
+    _books.removeAt(i);
     notifyListeners();
     return null;
   }
@@ -213,56 +272,56 @@ class LibraryService extends ChangeNotifier {
 
   // ---- Transactions ----
 
-  /// Returns an error message, or null on success. Due date is automatic.
-  String? checkOut(Book b, AppUser s, {DateTime? borrowedOn}) {
+  String _msg(Object e) => e.toString().replaceFirst('Exception: ', '');
+
+  /// Returns an error message, or null on success. Due date is set by the server.
+  Future<String?> checkOut(Book b, AppUser s) async {
     final err = eligibility(s, b);
     if (err != null) return err;
-    final start = _dateOnly(borrowedOn ?? DateTime.now());
-    _transactions.insert(
-      0,
-      BookTransaction(
-        id: _nextTxId++,
-        bookId: b.id,
-        book: b,
-        title: b.title,
-        borrower: s.fullName,
-        borrowerEmail: s.email.trim().toLowerCase(),
-        borrowedOn: start,
-        due: start.add(const Duration(days: loanDays)),
-      ),
-    );
-    notifyListeners();
+    try {
+      await BorrowApi.issue(b.remoteId, s.email);
+    } catch (e) {
+      return _msg(e);
+    }
+    await reload();
     return null;
   }
 
-  String? returnBook(int id) {
+  Future<String?> returnBook(int id) async {
     final i = _transactions.indexWhere((t) => t.id == id);
     if (i == -1) return 'Transaction not found.';
     if (_transactions[i].returned) return 'Already returned.';
-    _transactions[i] = _transactions[i].markReturned(DateTime.now());
-    notifyListeners();
+    try {
+      await BorrowApi.returnBook(_transactions[i].remoteId);
+    } catch (e) {
+      return _msg(e);
+    }
+    await reload();
     return null;
   }
 
-  String? payFine(int id) {
+  Future<String?> payFine(int id) async {
     final i = _transactions.indexWhere((t) => t.id == id);
     if (i == -1) return 'Transaction not found.';
     final t = _transactions[i];
     if (!t.returned) return 'Return the book before paying the fine.';
     if (t.fine <= 0) return 'No fine on this record.';
     if (t.finePaid) return 'Fine already paid.';
-    _transactions[i] = t.markFinePaid();
-    notifyListeners();
+    try {
+      await BorrowApi.payFine(t.remoteId);
+    } catch (e) {
+      return _msg(e);
+    }
+    await reload();
     return null;
   }
 
   /// Used by the student side so both apps share one record.
-  void returnLatest(Book b, String email) {
+  Future<void> returnLatest(Book b, String email) async {
     final e = email.trim().toLowerCase();
     final i = _transactions
         .indexWhere((t) => !t.returned && t.bookId == b.id && t.borrowerEmail == e);
     if (i == -1) return;
-    _transactions[i] = _transactions[i].markReturned(DateTime.now());
-    notifyListeners();
+    await returnBook(_transactions[i].id);
   }
 }
