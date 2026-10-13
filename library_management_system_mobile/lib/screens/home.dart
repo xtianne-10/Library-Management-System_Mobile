@@ -798,21 +798,6 @@ class _DueSoonCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const Spacer(),
-                    OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Palette.burgundy,
-                        side: const BorderSide(color: Palette.burgundy),
-                        minimumSize: const Size(0, 34),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                      ),
-                      onPressed: () {},
-                      child: const Text('Renew',
-                          style: TextStyle(fontWeight: FontWeight.w600)),
-                    ),
                   ],
                 ),
               ],
