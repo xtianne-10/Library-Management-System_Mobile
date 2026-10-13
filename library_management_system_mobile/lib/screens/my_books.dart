@@ -24,6 +24,18 @@ const _months = [
 ];
 String _fmt(DateTime d) => '${_months[d.month - 1]} ${d.day}, ${d.year}';
 
+const _cardColor = Colors.white;
+const _cardBorder = Color(0x1A000000);
+
+ButtonStyle _detailsButtonStyle() => FilledButton.styleFrom(
+      backgroundColor: Palette.burgundy,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      textStyle: const TextStyle(fontWeight: FontWeight.w700),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+
 class MyBooksScreen extends StatefulWidget {
   const MyBooksScreen({super.key});
 
@@ -307,6 +319,167 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+// Shared collapsible card used by loans and declined requests
+class _ExpandableCard extends StatefulWidget {
+  const _ExpandableCard({
+    super.key,
+    required this.book,
+    required this.statusLabel,
+    required this.statusColor,
+    required this.cardColor,
+    required this.borderColor,
+    required this.summary,
+    required this.summaryColor,
+    required this.details,
+    required this.actions,
+    this.progress,
+    this.progressColor,
+  });
+
+  final Book book;
+  final String statusLabel;
+  final Color statusColor;
+  final Color cardColor;
+  final Color borderColor;
+  final String summary;
+  final Color summaryColor;
+  final double? progress; // null hides the bar
+  final Color? progressColor;
+  final List<Widget> details; // rows shown when expanded
+  final List<Widget> actions; // buttons shown when expanded
+
+  @override
+  State<_ExpandableCard> createState() => _ExpandableCardState();
+}
+
+class _ExpandableCardState extends State<_ExpandableCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final book = widget.book;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: widget.cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: widget.borderColor),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _MiniCover(book: book),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: widget.statusColor.withAlpha(31),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(widget.statusLabel,
+                                    style: text.labelSmall?.copyWith(
+                                      color: widget.statusColor,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.5,
+                                    )),
+                              ),
+                              const Spacer(),
+                              AnimatedRotation(
+                                turns: _expanded ? 0.5 : 0,
+                                duration: const Duration(milliseconds: 200),
+                                child: const Icon(Icons.expand_more,
+                                    color: Palette.burgundy),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(book.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: text.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: Palette.textDark,
+                              )),
+                          const SizedBox(height: 2),
+                          Text(book.author,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: text.bodyMedium
+                                  ?.copyWith(color: Palette.textMuted)),
+                          const SizedBox(height: 10),
+                          if (widget.progress != null) ...[
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: widget.progress,
+                                minHeight: 6,
+                                backgroundColor: const Color(0x1A55161D),
+                                color: widget.progressColor,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                          ],
+                          Text(widget.summary,
+                              style: text.bodySmall?.copyWith(
+                                color: widget.summaryColor,
+                                fontWeight: FontWeight.w600,
+                              )),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  alignment: Alignment.topCenter,
+                  child: !_expanded
+                      ? const SizedBox(width: double.infinity)
+                      : Column(
+                          children: [
+                            const SizedBox(height: 14),
+                            const Divider(height: 1, color: Color(0x2655161D)),
+                            const SizedBox(height: 12),
+                            ...widget.details,
+                            const SizedBox(height: 12),
+                            Row(children: widget.actions),
+                          ],
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // Pending request card
 
 class _RequestCard extends StatelessWidget {
@@ -321,9 +494,9 @@ class _RequestCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Palette.card,
+        color: _cardColor,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x2655161D)),
+        border: Border.all(color: _cardBorder),
         boxShadow: const [
           BoxShadow(
             color: Color(0x14000000),
@@ -393,10 +566,10 @@ class _RequestCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton(
+                  child: FilledButton(
                     onPressed: () => openBookDetails(context, book),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Palette.burgundy,
+                    style: FilledButton.styleFrom(
+                      foregroundColor: Colors.white, backgroundColor: Palette.burgundy, elevation: 0,
                       side: const BorderSide(color: Palette.burgundy),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
@@ -446,99 +619,39 @@ class _DeclinedCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final book = request.book;
-    final text = Theme.of(context).textTheme;
     final red = Colors.red.shade700;
+    final declinedOn = request.decidedOn ?? request.requestedOn;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Palette.card,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x2655161D)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _MiniCover(book: book),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: red.withAlpha(31),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text('DECLINED',
-                            style: text.labelSmall?.copyWith(
-                              color: red,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
-                            )),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(book.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: text.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: Palette.textDark,
-                          )),
-                      const SizedBox(height: 2),
-                      Text(book.author,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: text.bodyMedium
-                              ?.copyWith(color: Palette.textMuted)),
-                      const SizedBox(height: 10),
-                      Text(
-                          'Declined ${_fmt(request.decidedOn ?? request.requestedOn)}',
-                          style: text.bodySmall?.copyWith(
-                            color: red,
-                            fontWeight: FontWeight.w600,
-                          )),
-                      const SizedBox(height: 2),
-                      Text('Requested ${_fmt(request.requestedOn)}',
-                          style: text.bodySmall
-                              ?.copyWith(color: Palette.textMuted)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: () => openBookDetails(context, book),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Palette.burgundy,
-                  side: const BorderSide(color: Palette.burgundy),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                child: const Text('View Details'),
-              ),
-            ),
-          ],
+    return _ExpandableCard(
+      book: request.book,
+      statusLabel: 'DECLINED',
+      statusColor: red,
+      cardColor: const Color.fromARGB(255, 235, 235, 235),
+      borderColor: red.withAlpha(90),
+      summary: 'Declined ${_fmt(declinedOn)}',
+      summaryColor: red,
+      details: [
+        _InfoRow(
+          icon: Icons.event_outlined,
+          label: 'Requested',
+          value: _fmt(request.requestedOn),
         ),
-      ),
+        _InfoRow(
+          icon: Icons.block,
+          label: 'Declined',
+          value: _fmt(declinedOn),
+          color: red,
+        ),
+      ],
+      actions: [
+        Expanded(
+          child: FilledButton(
+            onPressed: () => openBookDetails(context, request.book),
+            style: _detailsButtonStyle(),
+            child: const Text('View Details'),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -595,10 +708,9 @@ class _LoanCardState extends State<_LoanCard> {
       ));
   }
 
-  @override
+    @override
   Widget build(BuildContext context) {
     final loan = widget.loan;
-    final text = Theme.of(context).textTheme;
     final red = Colors.red.shade700;
 
     final (statusLabel, statusColor) = loan.isReturned
@@ -615,203 +727,78 @@ class _LoanCardState extends State<_LoanCard> {
                 ? 'Due today'
                 : '${loan.daysLeft} ${loan.daysLeft == 1 ? 'day' : 'days'} remaining';
 
-    // How much of the loan period has passed (0 to 1).
     final progress = loan.isOverdue
         ? 1.0
         : ((BorrowStore.loanDays - loan.daysLeft) / BorrowStore.loanDays)
             .clamp(0.0, 1.0);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Palette.card,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: loan.isOverdue ? red : const Color(0x2655161D),
+    return _ExpandableCard(
+      book: loan.book,
+      statusLabel: statusLabel,
+      statusColor: statusColor,
+      cardColor: _cardColor,
+      borderColor: loan.isOverdue ? red : _cardBorder,
+      summary: summary,
+      summaryColor: loan.isOverdue ? red : Palette.textDark,
+      progress: loan.isReturned ? null : progress,
+      progressColor: loan.isOverdue
+          ? red
+          : progress > 0.8
+              ? Palette.amber
+              : Palette.slytherin,
+      details: [
+        _InfoRow(
+          icon: Icons.event_available_outlined,
+          label: 'Borrowed',
+          value: _fmt(loan.borrowedOn),
         ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 10,
-            offset: Offset(0, 4),
+        _InfoRow(
+          icon: Icons.event_outlined,
+          label: 'Due',
+          value: _fmt(loan.dueOn),
+          color: loan.isOverdue ? red : null,
+        ),
+        if (loan.isOverdue)
+          _InfoRow(
+            icon: Icons.payments_outlined,
+            label: 'Fine',
+            value: '₱${loan.fine.toStringAsFixed(2)}',
+            color: red,
+            bold: true,
           ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () => setState(() => _expanded = !_expanded),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _MiniCover(book: loan.book),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: statusColor.withAlpha(31),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(statusLabel,
-                                    style: text.labelSmall?.copyWith(
-                                      color: statusColor,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 0.5,
-                                    )),
-                              ),
-                              const Spacer(),
-                              AnimatedRotation(
-                                turns: _expanded ? 0.5 : 0,
-                                duration: const Duration(milliseconds: 200),
-                                child: const Icon(Icons.expand_more,
-                                    color: Palette.burgundy),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(loan.book.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                color: Palette.textDark,
-                              )),
-                          const SizedBox(height: 2),
-                          Text(loan.book.author,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.bodyMedium
-                                  ?.copyWith(color: Palette.textMuted)),
-                          const SizedBox(height: 10),
-                          if (!loan.isReturned) ...[
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: progress,
-                                minHeight: 6,
-                                backgroundColor: const Color(0x1A55161D),
-                                color: loan.isOverdue
-                                    ? red
-                                    : progress > 0.8
-                                        ? Palette.amber
-                                        : Palette.slytherin,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                          ],
-                          Text(summary,
-                              style: text.bodySmall?.copyWith(
-                                color: loan.isOverdue ? red : Palette.textDark,
-                                fontWeight: FontWeight.w600,
-                              )),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-
-                // Expanded details
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOut,
-                  alignment: Alignment.topCenter,
-                  child: !_expanded
-                      ? const SizedBox(width: double.infinity)
-                      : Column(
-                          children: [
-                            const SizedBox(height: 14),
-                            const Divider(height: 1, color: Color(0x2655161D)),
-                            const SizedBox(height: 12),
-                            _InfoRow(
-                              icon: Icons.event_available_outlined,
-                              label: 'Borrowed',
-                              value: _fmt(loan.borrowedOn),
-                            ),
-                            _InfoRow(
-                              icon: Icons.event_outlined,
-                              label: 'Due',
-                              value: _fmt(loan.dueOn),
-                              color: loan.isOverdue ? red : null,
-                            ),
-                            if (loan.isOverdue)
-                              _InfoRow(
-                                icon: Icons.payments_outlined,
-                                label: 'Fine',
-                                value: '₱${loan.fine.toStringAsFixed(2)}',
-                                color: red,
-                                bold: true,
-                              ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: OutlinedButton(
-                                    onPressed: () =>
-                                        openBookDetails(context, loan.book),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: Palette.burgundy,
-                                      side: const BorderSide(
-                                          color: Palette.burgundy),
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 12),
-                                      shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(12)),
-                                    ),
-                                    child: const Text('View Details'),
-                                  ),
-                                ),
-                                if (!loan.isReturned) ...[
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: FilledButton(
-                                      onPressed: _returning ? null : _return,
-                                      style: FilledButton.styleFrom(
-                                        backgroundColor: Palette.burgundy,
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 12),
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12)),
-                                      ),
-                                      child: _returning
-                                          ? const SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                  color: Colors.white),
-                                            )
-                                          : const Text('Return'),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ],
-                        ),
-                ),
-              ],
+      ],
+      actions: [
+        Expanded(
+          child: FilledButton(
+            onPressed: () => openBookDetails(context, loan.book),
+            style: _detailsButtonStyle(),
+            child: const Text('View Details'),
+          ),
+        ),
+        if (!loan.isReturned) ...[
+          const SizedBox(width: 12),
+          Expanded(
+            child: FilledButton(
+              onPressed: _returning ? null : _return,
+              style: _detailsButtonStyle().copyWith(
+                backgroundColor: WidgetStatePropertyAll(Palette.slytherin),
+              ),
+              child: _returning
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Return'),
             ),
           ),
-        ),
-      ),
+        ],
+      ],
     );
   }
 }
+
 
 class _InfoRow extends StatelessWidget {
   const _InfoRow({
@@ -856,16 +843,61 @@ class _MiniCover extends StatelessWidget {
   const _MiniCover({required this.book});
   final Book book;
 
+  static const double width = 64;
+  static const double height = 92;
+  static const radius = BorderRadius.all(Radius.circular(6));
+
+  // Used when the book has no image or it fails to load
+  Widget _fallback() => Container(
+        width: width,
+        height: height,
+        padding: const EdgeInsets.all(6),
+        color: book.color,
+        child: Text(
+          book.title,
+          maxLines: 5,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Palette.gold,
+            fontFamily: 'Georgia',
+            fontFamilyFallback: ['serif'],
+            fontWeight: FontWeight.w700,
+            fontSize: 10,
+            height: 1.2,
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
+    Widget content;
+    if (book.imageBytes != null) {
+      content = Image.memory(
+        book.imageBytes!,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => _fallback(),
+      );
+    } else if (book.imageUrl.isNotEmpty) {
+      content = Image.network(
+        book.imageUrl,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _fallback(),
+      );
+    } else {
+      content = _fallback();
+    }
+
     return Container(
-      width: 64,
-      height: 92,
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: book.color,
-        borderRadius: BorderRadius.circular(6),
-        boxShadow: const [
+      width: width,
+      height: height,
+      decoration: const BoxDecoration(
+        borderRadius: radius,
+        boxShadow: [
           BoxShadow(
             color: Color(0x33000000),
             blurRadius: 6,
@@ -873,18 +905,7 @@ class _MiniCover extends StatelessWidget {
           ),
         ],
       ),
-      child: Text(
-        book.title,
-        maxLines: 5,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: Palette.gold,
-          fontFamily: 'Georgia',
-          fontWeight: FontWeight.w700,
-          fontSize: 10,
-          height: 1.2,
-        ),
-      ),
+      child: ClipRRect(borderRadius: radius, child: content),
     );
   }
 }
