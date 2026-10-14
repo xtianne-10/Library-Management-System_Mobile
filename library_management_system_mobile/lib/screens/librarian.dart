@@ -32,6 +32,17 @@ const _declineReasons = [
 
 String _cleanIsbn(String s) => s.replaceAll(RegExp(r'[\s-]'), '').toUpperCase();
 
+// MM/DD/YYYY (or M/D/YYYY, also with dashes) -> DateTime, or null if invalid
+DateTime? _parseUsDate(String s) {
+  final m = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$').firstMatch(s.trim());
+  if (m == null) return null;
+  final mo = int.parse(m.group(1)!);
+  final d = int.parse(m.group(2)!);
+  final y = int.parse(m.group(3)!);
+  final dt = DateTime(y, mo, d);
+  return (dt.year == y && dt.month == mo && dt.day == d) ? dt : null;
+}
+
 String? _validateIsbn(String? v) {
   final s = _cleanIsbn(v ?? '');
   if (s.isEmpty) return 'ISBN is required.';
@@ -2694,8 +2705,8 @@ class _BookFormState extends State<_BookForm> {
 // ---------- Bulk import ----------
 
 const _csvTemplate = '''title,author,isbn,publisher,category,published,copies,pages,description,image,subcategory,shelf
-The Hobbit,J.R.R. Tolkien,9780547928227,Allen & Unwin,Fiction,1937-09-21,3,310,A hobbit goes on an unexpected adventure.,,Fantasy,Aisle 1
-A Brief History of Time,Stephen Hawking,9780553380163,Bantam Books,Non-Fiction,1988-04-01,2,212,An introduction to cosmology for general readers.,https://example.com/cover.jpg,Cosmology,Aisle 4
+The Hobbit,J.R.R. Tolkien,9780547928227,Allen & Unwin,Fiction,09/21/1937,3,310,A hobbit goes on an unexpected adventure.,,Fantasy,Aisle 1
+A Brief History of Time,Stephen Hawking,9780553380163,Bantam Books,Non-Fiction,04/01/1988,2,212,An introduction to cosmology for general readers.,https://example.com/cover.jpg,Cosmology,Aisle 4
 ''';
 
 /// Minimal CSV parser: handles quotes, commas and line breaks inside quotes.
@@ -2899,10 +2910,10 @@ class _ImportSheetState extends State<_ImportSheet> {
       }
 
       final pubRaw = cellOf(r, 'published');
-      final published = DateTime.tryParse(pubRaw);
+      final published = _parseUsDate(pubRaw);
       check(Validators.publishedDate(published));
       if (published == null && pubRaw.isNotEmpty) {
-        row.errors.add('Use the date format YYYY-MM-DD.');
+        row.errors.add('Use the date format MM/DD/YYYY.');
       }
 
       final copiesRaw = cellOf(r, 'copies');
@@ -3466,7 +3477,7 @@ const _guide = <(String, bool, String, String)>[
   ('isbn', true, '10 or 13 digits (used to match existing books)', '9780547928227'),
   ('publisher', true, 'Up to 60 characters', 'Allen & Unwin'),
   ('category', true, 'Pick from the list below', 'Fiction'),
-  ('published', true, 'YYYY-MM-DD, not in the future', '1937-09-21'),
+  ('published', true, 'MM/DD/YYYY, not in the future', '09/21/1937'),
   ('pages', true, 'Whole number 1 to 10000', '310'),
   ('description', false, '10 to 300 characters (blank keeps current)', 'A hobbit goes on an adventure.'),
   ('copies', false, 'Whole number 1 to 99 (blank = 1, or current)', '3'),
@@ -3604,12 +3615,12 @@ class _SamplePreview extends StatelessWidget {
   static const _rows = [
     [
       'The Hobbit', 'J.R.R. Tolkien', '9780547928227', 'Allen & Unwin',
-      'Fiction', '1937-09-21', '3', '310', 'A hobbit goes on...', '',
+      'Fiction', '09/21/1937', '3', '310', 'A hobbit goes on...', '',
       'Fantasy', 'Aisle 1',
     ],
     [
       'A Brief History of Time', 'Stephen Hawking', '9780553380163',
-      'Bantam Books', 'Non-Fiction', '1988-04-01', '2', '212',
+      'Bantam Books', 'Non-Fiction', '04/01/1988', '2', '212',
       'An intro to cosmology...', 'https://...', 'Cosmology', 'Aisle 4',
     ],
   ];
