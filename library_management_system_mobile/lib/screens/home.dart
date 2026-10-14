@@ -8,6 +8,7 @@ import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/globes/borrow_store.dart';
 import 'package:library_management_system_mobile/screens/book_details.dart';
+import 'package:library_management_system_mobile/screens/borrower_notifications.dart';
 import 'package:library_management_system_mobile/widgets/book_cover.dart';
 
 String _greeting() {
@@ -80,6 +81,15 @@ class _HomeScreenState extends State<HomeScreen> {
       Navigator.pushReplacementNamed(context, '/mybooks', arguments: tab);
   void _goExplore() => Navigator.pushReplacementNamed(context, '/explore');
 
+  Future<void> _openNotifications() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => const BorrowerNotificationsScreen()),
+    );
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final topInset = MediaQuery.of(context).padding.top;
@@ -118,7 +128,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: EdgeInsets.fromLTRB(20, topInset + 16, 20, 0),
                   child: Column(
                     children: [
-                      _Header(onSearch: _goExplore),
+                      _Header(
+                        onSearch: _goExplore,
+                        unseen: unseenBorrowerCount(),
+                        onNotifications: _openNotifications,
+                      ),
                       const SizedBox(height: 24),
                       ListenableBuilder(
                         listenable: BorrowStore.instance,
@@ -257,8 +271,14 @@ class _HomeScreenState extends State<HomeScreen> {
 // Header
 
 class _Header extends StatelessWidget {
-  const _Header({required this.onSearch});
+  const _Header({
+    required this.onSearch,
+    required this.unseen,
+    required this.onNotifications,
+  });
   final VoidCallback onSearch;
+  final int unseen;
+  final VoidCallback onNotifications;
 
   @override
   Widget build(BuildContext context) {
@@ -298,6 +318,17 @@ class _Header extends StatelessWidget {
                 ],
               ),
             ),
+            IconButton(
+              tooltip: 'Notifications',
+              onPressed: onNotifications,
+              icon: Badge(
+                isLabelVisible: unseen > 0,
+                label: Text('$unseen'),
+                child: const Icon(Icons.notifications_outlined,
+                    color: Palette.creamLight, size: 28),
+              ),
+            ),
+            const SizedBox(width: 4),
             Container(
               padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(
