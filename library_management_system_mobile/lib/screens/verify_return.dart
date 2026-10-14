@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 
@@ -18,10 +19,11 @@ class _VerifyReturnScreenState extends State<VerifyReturnScreen> {
     formats: const [BarcodeFormat.qrCode],
   );
   final _code = TextEditingController();
-  int _mode = 0; // 0 = scan, 1 = enter number
+  int _mode = 0;
   bool _busy = false;
   String? _error;
   String? _success;
+  BookTransaction? _tx;
   String _lastText = '';
   DateTime _lastAt = DateTime(2000);
 
@@ -35,9 +37,32 @@ class _VerifyReturnScreenState extends State<VerifyReturnScreen> {
   Future<void> _verify(String raw) async {
     if (_busy) return;
     setState(() { _busy = true; _error = null; });
+
+    // Loans waiting for return verification before we verify
+    final pendingIds =
+        _lib.transactions.where((t) => t.pendingReturn).map((t) => t.id).toSet();
+
     final (err, summary) = await _lib.verifyReturn(raw);
+
+    // Reload, then find which pending loan is now returned
+    BookTransaction? done;
+    if (err == null) {
+      await _lib.reload();
+      final matches = _lib.transactions
+          .where((t) => pendingIds.contains(t.id) && t.returned)
+          .toList()
+        ..sort((a, b) => (b.returnedOn ?? DateTime(2000))
+            .compareTo(a.returnedOn ?? DateTime(2000)));
+      if (matches.isNotEmpty) done = matches.first;
+    }
+
     if (!mounted) return;
-    setState(() { _busy = false; _error = err; _success = summary; });
+    setState(() {
+      _busy = false;
+      _error = err;
+      _success = summary;
+      _tx = done;
+    });
   }
 
   void _onDetect(BarcodeCapture capture) {
@@ -92,10 +117,15 @@ class _VerifyReturnScreenState extends State<VerifyReturnScreen> {
                 ],
               ),
             ),
+            if (_tx != null) ...[
+              const SizedBox(height: 14),
+              _ReturnDetails(tx: _tx!),
+            ],
             const SizedBox(height: 16),
             FilledButton(
               onPressed: () => setState(() {
                 _success = null;
+                _tx = null;
                 _error = null;
                 _code.clear();
               }),
@@ -170,6 +200,179 @@ class _VerifyReturnScreenState extends State<VerifyReturnScreen> {
                       color: Color(0xFFC0121F), fontWeight: FontWeight.w600)),
             ],
           ],
+        ],
+      ),
+    );
+  }
+}
+
+
+String _d(DateTime? d) {
+  const m = [
+    'January', 'February', 'March', 'April', 'May', 'June', 'July',
+    'August', 'September', 'October', 'November', 'December',
+  ];
+  return d == null ? '-' : '${m[d.month - 1]} ${d.day}, ${d.year}';
+}
+
+class _ReturnDetails extends StatelessWidget {
+  const _ReturnDetails({required this.tx});
+  final BookTransaction tx;
+
+  @override
+  Widget build(BuildContext context) {
+    const red = Color(0xFFC0121F);
+    const green = Color(0xFF0C7A43);
+    final t = tx;
+
+    Book? book;
+    for (final b in LibraryService.instance.books) {
+      if (b.id == t.bookId) {
+        book = b;
+        break;
+      }
+    }
+
+    Widget cover() {
+      final placeholder = Container(
+        width: 64,
+        height: 92,
+        color: book?.color ?? Palette.burgundy,
+      );
+      final url = book?.imageUrl.trim() ?? '';
+      Widget img = placeholder;
+      if (book?.imageBytes != null) {
+        img = Image.memory(book!.imageBytes!,
+            width: 64, height: 92, fit: BoxFit.cover);
+      } else if (url.isNotEmpty) {
+        img = Image.network(url,
+            width: 64,
+            height: 92,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => placeholder);
+      }
+      return ClipRRect(borderRadius: BorderRadius.circular(4), child: img);
+    }
+
+    Widget cell(String label, String value) => SizedBox(
+          width: 140,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 12, color: Palette.textMuted)),
+              Text(value.isEmpty ? '-' : value,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        );
+
+    final cat = book == null
+        ? ''
+        : '${book.category}${book.subcategory.isNotEmpty ? ' · ${book.subcategory}' : ''}';
+
+    final late = t.daysOverdue;
+    final rate = LibraryService.finePerDay;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0x334A1F1F)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Book
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              cover(),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(t.title,
+                        style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: Palette.burgundy)),
+                    if (book != null)
+                      Text('by ${book.author}',
+                          style: const TextStyle(
+                              fontSize: 13, color: Palette.textMuted)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (book != null) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                cell('Category', cat),
+                cell('Publisher', book.publisher),
+                cell('ISBN', book.isbn),
+                cell('Pages', book.pages == null ? '' : '${book.pages}'),
+                cell('Shelf / Location', book.shelf),
+              ],
+            ),
+          ],
+          const Divider(height: 24, color: Color(0x1A4A1F1F)),
+
+          // Borrower + dates
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              cell('Returned by', t.borrower),
+              cell('Email', t.borrowerEmail),
+              cell('Borrowed on', _d(t.borrowedOn)),
+              cell('Due date', _d(t.due)),
+              cell('Returned on', _d(t.returnedOn)),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Fine computation
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: (t.fine > 0 ? red : green).withAlpha(25),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: t.fine > 0
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Late return',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700, color: red)),
+                      const SizedBox(height: 4),
+                      Text(
+                          '$late ${late == 1 ? 'day' : 'days'} late × '
+                          '₱${rate.toStringAsFixed(2)}/day',
+                          style: const TextStyle(fontSize: 13)),
+                      const SizedBox(height: 2),
+                      Text('Fine due: ₱${t.fine.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: red)),
+                    ],
+                  )
+                : const Text('Returned on time. No fine.',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700, color: green)),
+          ),
         ],
       ),
     );

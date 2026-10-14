@@ -5,6 +5,8 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:typed_data';
+import 'dart:math' as math;
+import 'dart:ui' show FontFeature;
 import 'package:library_management_system_mobile/utils/csv_download.dart';
 
 import 'package:library_management_system_mobile/models/book.dart';
@@ -60,6 +62,55 @@ String? _validateDescription(String? v) {
   return null;
 }
 
+// Change this one line if your enum is named differently (e.g. UserRole.faculty)
+bool _isFaculty(AppUser u) => u.role == UserRole.professor;
+
+// Same colors as loanTone() in HomeLibrarian.jsx
+Color _loanTone(int count) {
+  if (count >= LibraryService.maxActiveLoans) return const Color(0xFFC0121F);
+  if (count > LibraryService.maxActiveLoans / 2) return const Color(0xFFEEA51C);
+  return const Color(0xFF0C7A43);
+}
+
+class _UserAvatar extends StatelessWidget {
+  const _UserAvatar(this.user, {this.radius = 20});
+  final AppUser user;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = user.avatar;
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: Palette.burgundy,
+      backgroundImage: bytes != null ? MemoryImage(bytes) : null,
+      child: bytes == null
+          ? Text(user.initial,
+              style: TextStyle(
+                  color: Palette.creamLight,
+                  fontWeight: FontWeight.w700,
+                  fontSize: radius * 0.8))
+          : null,
+    );
+  }
+}
+
+class _SolidPill extends StatelessWidget {
+  const _SolidPill(this.label, this.color);
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+        decoration: BoxDecoration(
+            color: color, borderRadius: BorderRadius.circular(99)),
+        child: Text(label,
+            style: const TextStyle(
+                color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+      );
+}
+
 const _months = [
   'January', 'February', 'March', 'April', 'May', 'June', 'July',
   'August', 'September', 'October', 'November', 'December',
@@ -79,6 +130,37 @@ const _cardShape = RoundedRectangleBorder(
   borderRadius: BorderRadius.all(Radius.circular(16)),
   side: BorderSide(color: Color(0x2655161D)),
 );
+
+const _tableCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(12)),
+  side: BorderSide(color: Color(0x334A1F1F)),
+);
+
+class _BookCover extends StatelessWidget {
+  const _BookCover(this.bookId, this.title, {this.w = 34, this.h = 50});
+  final int bookId;
+  final String title;
+  final double w, h;
+
+  @override
+  Widget build(BuildContext context) {
+    Book? b;
+    for (final x in LibraryService.instance.books) {
+      if (x.id == bookId) {
+        b = x;
+        break;
+      }
+    }
+    return _Cover(
+      url: b?.imageUrl ?? '',
+      bytes: b?.imageBytes,
+      color: b?.color ?? Palette.burgundy,
+      title: title,
+      w: w,
+      h: h,
+    );
+  }
+}
 
 const _statIcons = {
   'Total Book Copies': Icons.menu_book,
@@ -109,24 +191,46 @@ InputDecoration _fieldDec({String? label, String? hint, Widget? prefix}) =>
     );
 
 class _Section extends StatelessWidget {
-  const _Section(this.title, this.icon);
+  const _Section(this.title, this.icon, {this.actionLabel, this.onAction});
   final String title;
   final IconData icon;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) => Row(
         children: [
-          Icon(icon, color: Palette.amber, size: 22),
-          const SizedBox(width: 8),
-          Text(title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    fontFamily: 'Georgia',
-                    color: Palette.burgundy,
-                  )),
-          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Palette.burgundy.withAlpha(18),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: Palette.burgundy, size: 18),
+          ),
+          const SizedBox(width: 10),
           Expanded(
-              child: Divider(color: Palette.amber.withAlpha(120), thickness: 1)),
+            child: Text(title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      fontFamily: 'Georgia',
+                      color: Palette.burgundy,
+                      letterSpacing: -0.2,
+                    )),
+          ),
+          if (actionLabel != null)
+            TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF0B4A8B),
+                visualDensity: VisualDensity.compact,
+                textStyle:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+              child: Text(actionLabel!),
+            ),
         ],
       );
 }
@@ -143,9 +247,31 @@ class _LibNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return NavigationBar(
+    return NavigationBarTheme(
+      data: NavigationBarThemeData(
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final on = states.contains(WidgetState.selected);
+          return TextStyle(
+            fontSize: 12,
+            fontWeight: on ? FontWeight.w700 : FontWeight.w500,
+            color: on ? Palette.amber : Palette.creamMuted,
+          );
+        }),
+        iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
+              color: states.contains(WidgetState.selected)
+                  ? Palette.amber
+                  : Palette.creamLight,
+            )),
+      ),
+      child: NavigationBar(
       selectedIndex: index,
       onDestinationSelected: onChanged,
+      backgroundColor: Palette.burgundy,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.black26,
+      elevation: 8,
+      indicatorColor: Colors.white.withAlpha(30),
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       destinations: [
         const NavigationDestination(
             icon: Icon(Icons.dashboard_outlined),
@@ -172,6 +298,7 @@ class _LibNavBar extends StatelessWidget {
             selectedIcon: Icon(Icons.person),
             label: 'Profile'),
       ],
+      ),
     );
   }
 }
@@ -187,6 +314,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   final _lib = LibraryService.instance;
   int _tab = 0;
   String _query = '';
+  String _categoryFilter = 'All';
   String _sortKey = 'title';
   bool _asc = true;
   String _txFilter = 'All Statuses';
@@ -273,9 +401,10 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     final q = _query.trim().toLowerCase();
     final list = _lib.books
         .where((b) =>
-            q.isEmpty ||
-            b.title.toLowerCase().contains(q) ||
-            b.author.toLowerCase().contains(q))
+            (_categoryFilter == 'All' || b.category == _categoryFilter) &&
+            (q.isEmpty ||
+                b.title.toLowerCase().contains(q) ||
+                b.author.toLowerCase().contains(q)))
         .toList()
       ..sort((a, b) {
         final c = _val(a).toLowerCase().compareTo(_val(b).toLowerCase());
@@ -456,37 +585,44 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       // Quick actions
       const _Section('Quick Actions', Icons.bolt),
       const SizedBox(height: 12),
-      Row(
+            GridView.count(
+        crossAxisCount: 2,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 2.3,
         children: [
-          Expanded(
-              child: _QuickAction(
-                  icon: Icons.assignment_ind_outlined,
-                  label: 'Borrowing',
-                  onTap: () => _openIssue())),
-          const SizedBox(width: 10),
-          Expanded(
-              child: _QuickAction(
-                  icon: Icons.assignment_return_outlined,
-                  label: 'Returns',
-                  badge: _lib.transactions.where((t) => t.pendingReturn).length,
-                  onTap: _openVerifyReturn)),
-          const SizedBox(width: 10),
-          Expanded(
-              child: _QuickAction(
-                  icon: Icons.menu_book_outlined,
-                  label: 'Catalog',
-                  onTap: () => setState(() {
-                        _tab = 1;
-                        _sortKey = 'title';
-                        _asc = true;
-                        _catalogPage = 0;
-                      }))),
-          const SizedBox(width: 10),
-          Expanded(
-              child: _QuickAction(
-                  icon: Icons.history,
-                  label: 'History',
-                  onTap: () => _goTransactions('All Statuses'))),
+          _QuickAction(
+            icon: Icons.assignment_ind_outlined,
+            label: 'Borrowing',
+            sub: 'Issue a book',
+            onTap: () => _openIssue(),
+          ),
+          _QuickAction(
+            icon: Icons.assignment_return_outlined,
+            label: 'Returns',
+            sub: 'Verify returns',
+            badge: _lib.transactions.where((t) => t.pendingReturn).length,
+            onTap: _openVerifyReturn,
+          ),
+          _QuickAction(
+            icon: Icons.menu_book_outlined,
+            label: 'Catalog',
+            sub: 'Add and manage',
+            onTap: () => setState(() {
+              _tab = 1;
+              _sortKey = 'title';
+              _asc = true;
+              _catalogPage = 0;
+            }),
+          ),
+          _QuickAction(
+            icon: Icons.history,
+            label: 'History',
+            sub: 'All transactions',
+            onTap: () => _goTransactions('All Statuses'),
+          ),
         ],
       ),
       const SizedBox(height: 28),
@@ -500,7 +636,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         physics: const NeverScrollableScrollPhysics(),
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        childAspectRatio: 1.8,
+        childAspectRatio: 1.7,
         children: [
           for (final s in stats)
             InkWell(
@@ -520,11 +656,20 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       // Borrowing vs returns
       const _Section('Borrowing Activity', Icons.bar_chart),
       const SizedBox(height: 12),
-      _BorrowChart(transactions: _lib.transactions),
+      _BorrowChart(
+          transactions: _lib.transactions, requests: _lib.pendingRequests),
+      const SizedBox(height: 28),
+
+      // Analytics (same charts as the web dashboard)
+      const _Section('Analytics', Icons.insights),
+      const SizedBox(height: 12),
+      const _AnalyticsSection(),
       const SizedBox(height: 28),
 
       // Pending requests
-      _Section('Pending Requests (${pending.length})', Icons.how_to_reg),
+      _Section('Pending Requests (${pending.length})', Icons.how_to_reg,
+          actionLabel: pending.isEmpty ? null : 'View all',
+          onAction: _openRequests),
       const SizedBox(height: 12),
       if (pending.isEmpty)
         const _EmptyNote(
@@ -554,19 +699,13 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               ),
             ),
         ]),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(
-            onPressed: _openRequests,
-            style: TextButton.styleFrom(foregroundColor: Palette.burgundy),
-            child: Text('View all (${pending.length})'),
-          ),
-        ),
       ],
       const SizedBox(height: 20),
 
       // Overdue books
-      const _Section('Overdue Books', Icons.warning_amber_rounded),
+      _Section('Overdue Books', Icons.warning_amber_rounded,
+          actionLabel: overdue.isEmpty ? null : 'View all',
+          onAction: () => _goTransactions('Overdue')),
       const SizedBox(height: 12),
       if (overdue.isEmpty)
         const _EmptyNote(
@@ -595,14 +734,6 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                       color: Color(0xFFC0121F), fontWeight: FontWeight.w700)),
             ),
         ]),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(
-            onPressed: () => _goTransactions('Overdue'),
-            style: TextButton.styleFrom(foregroundColor: Palette.burgundy),
-            child: Text('View all (${overdue.length})'),
-          ),
-        ),
       ],
     ];
   }
@@ -1201,6 +1332,24 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         ),
         child: Row(
           children: [
+            Container(
+              padding: const EdgeInsets.all(2),
+              decoration: const BoxDecoration(
+                  shape: BoxShape.circle, color: Palette.amber),
+              child: CircleAvatar(
+                radius: 21,
+                backgroundColor: Palette.creamLight,
+                backgroundImage:
+                    user?.avatar != null ? MemoryImage(user!.avatar!) : null,
+                child: user?.avatar == null
+                    ? Text(user?.initial ?? '?',
+                        style: const TextStyle(
+                            color: Palette.burgundy,
+                            fontWeight: FontWeight.w800))
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1231,6 +1380,8 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
             ),
             IconButton(
               tooltip: 'Notifications',
+              style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withAlpha(25)),
               onPressed: () {
                 setState(
                     () => _seenNotes.addAll(_notifications().map(_noteKey)));
@@ -1290,11 +1441,9 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     ));
   }
 
-  Future<void> _openStudent(AppUser s) => showModalBottomSheet<void>(
+  Future<void> _openStudent(AppUser s) => showDialog<void>(
         context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        builder: (_) => _StudentSheet(
+        builder: (_) => _StudentDialog(
           email: s.email,
           onReturn: _returnTx,
           onIssue: (st) => _openIssue(student: st),
@@ -1450,6 +1599,40 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                 }),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 38,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final c in const ['All', ..._categories])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(c),
+                      selected: _categoryFilter == c,
+                      showCheckmark: false,
+                      backgroundColor: Colors.white,
+                      selectedColor: Palette.burgundy,
+                      side: BorderSide(
+                          color: Palette.burgundy
+                              .withAlpha(_categoryFilter == c ? 255 : 70)),
+                      labelStyle: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: _categoryFilter == c
+                            ? Colors.white
+                            : Palette.burgundy,
+                      ),
+                      onSelected: (_) => setState(() {
+                        _categoryFilter = c;
+                        _catalogPage = 0;
+                      }),
+                    ),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           if (books.isEmpty)
@@ -1736,14 +1919,21 @@ class _Badge extends StatelessWidget {
   final Color color;
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-        decoration:
-            BoxDecoration(color: color, borderRadius: BorderRadius.circular(99)),
-        child: Text(label,
-            style: const TextStyle(
-                color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
-      );
+  Widget build(BuildContext context) {
+    // Amber text is hard to read on a light tint, so use the darker amber from the web.
+    final fg = color == const Color(0xFFEEA51C) ? const Color(0xFF8A5A00) : color;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withAlpha(26),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: color.withAlpha(80)),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              color: fg, fontSize: 11, fontWeight: FontWeight.w700)),
+    );
+  }
 }
 
 class _Cover extends StatelessWidget {
@@ -1821,13 +2011,18 @@ class _CatalogCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final meta = [
+      if (book.publisher.isNotEmpty) book.publisher,
+      if (book.published != null) '${book.published!.year}',
+    ].join(' · ');
+
     return Card(
       elevation: 0,
-      color: Palette.card,
+      color: Colors.white,
       shape: _cardShape,
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1836,8 +2031,8 @@ class _CatalogCard extends StatelessWidget {
                 bytes: book.imageBytes,
                 color: book.color,
                 title: book.title,
-                w: 56,
-                h: 80),
+                w: 60,
+                h: 88),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1847,34 +2042,56 @@ class _CatalogCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 15)),
-                  Text(book.author,
-                      style: const TextStyle(color: Palette.textMuted)),
-                  const SizedBox(height: 4),
-                  Text(
-                    [
-                      if (book.publisher.isNotEmpty) book.publisher,
-                      book.category,
-                      if (book.published != null) _fmt(book.published),
-                    ].join(' · '),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  const SizedBox(height: 4),
-                  Text('$left of ${book.totalCopies} copies available',
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          height: 1.2,
+                          color: Palette.textDark)),
+                  const SizedBox(height: 2),
+                  Text('by ${book.author}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 6),
-                  Row(
+                          color: Palette.textMuted, fontSize: 12.5)),
+                  if (meta.isNotEmpty)
+                    Text(meta,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Palette.textMuted, fontSize: 12)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
                     children: [
+                      _Badge(book.category, Palette.burgundy),
                       left > 0
                           ? const _Badge('Available', Color(0xFF0C7A43))
                           : const _Badge('Unavailable', Color(0xFFEEA51C)),
-                      const SizedBox(width: 8),
-                      TextButton(
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.inventory_2_outlined,
+                          size: 14, color: Palette.textMuted),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text('$left of ${book.totalCopies} available',
+                            style: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w600)),
+                      ),
+                      FilledButton(
                         onPressed: left > 0 ? onIssue : null,
-                        style: TextButton.styleFrom(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Palette.amber,
+                          foregroundColor: Colors.white,
                           visualDensity: VisualDensity.compact,
-                          foregroundColor: Palette.burgundy,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
+                          textStyle: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w700),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
                         ),
                         child: const Text('Issue'),
                       ),
@@ -1883,19 +2100,30 @@ class _CatalogCard extends StatelessWidget {
                 ],
               ),
             ),
-            Column(
-              children: [
-                IconButton(
-                    tooltip: 'Edit ${book.title}',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onEdit,
-                    icon: const Icon(Icons.edit_outlined)),
-                IconButton(
-                    tooltip: 'Delete ${book.title}',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onDelete,
-                    color: const Color(0xFFC0121F),
-                    icon: const Icon(Icons.delete_outline)),
+            PopupMenuButton<String>(
+              tooltip: 'More options for ${book.title}',
+              icon: const Icon(Icons.more_vert, size: 20),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Row(children: [
+                    Icon(Icons.edit_outlined, size: 18),
+                    SizedBox(width: 10),
+                    Text('Edit'),
+                  ]),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Row(children: [
+                    Icon(Icons.delete_outline,
+                        size: 18, color: Color(0xFFC0121F)),
+                    SizedBox(width: 10),
+                    Text('Delete', style: TextStyle(color: Color(0xFFC0121F))),
+                  ]),
+                ),
               ],
             ),
           ],
@@ -1922,11 +2150,11 @@ class _TxCard extends StatelessWidget {
 
     return Card(
       elevation: 0,
-      color: Palette.card,
+      color: Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-            color: t.overdue ? red.withAlpha(150) : const Color(0x2655161D)),
+            color: t.overdue ? red.withAlpha(150) : const Color(0x334A1F1F)),
       ),
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
@@ -1936,10 +2164,13 @@ class _TxCard extends StatelessWidget {
           children: [
             Row(
               children: [
+                _BookCover(t.bookId, t.title),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(t.title,
                       style: const TextStyle(fontWeight: FontWeight.w700)),
                 ),
+                const SizedBox(width: 8),
                 _Badge(t.overdue ? 'Overdue' : t.status, color),
               ],
             ),
@@ -2063,7 +2294,7 @@ class _PagedTxList extends StatefulWidget {
 }
 
 class _PagedTxListState extends State<_PagedTxList> {
-  static const _size = 3;
+  static const _size = 5;
   int _page = 0;
 
   @override
@@ -2077,7 +2308,7 @@ class _PagedTxListState extends State<_PagedTxList> {
     return Column(
       children: [
         for (final t in all.sublist(start, end))
-          _TxCard(tx: t, onReturn: () => widget.onReturn(t)),
+          _RecordCard(tx: t, onReturn: () => widget.onReturn(t)),
         _Pager(
           page: page,
           total: all.length,
@@ -2085,6 +2316,149 @@ class _PagedTxListState extends State<_PagedTxList> {
           onChanged: (p) => setState(() => _page = p),
         ),
       ],
+    );
+  }
+}
+
+class _RecordCard extends StatefulWidget {
+  const _RecordCard({required this.tx, required this.onReturn});
+  final BookTransaction tx;
+  final VoidCallback onReturn;
+
+  @override
+  State<_RecordCard> createState() => _RecordCardState();
+}
+
+class _RecordCardState extends State<_RecordCard> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.tx;
+    const red = Color(0xFFC0121F);
+    const green = Color(0xFF0C7A43);
+    final color = t.overdue
+        ? red
+        : t.returned
+            ? green
+            : const Color(0xFFEEA51C);
+
+    Widget row(String label, String value) => Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style:
+                      const TextStyle(fontSize: 12, color: Palette.textMuted)),
+              Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+            ],
+          ),
+        );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: t.overdue ? red.withAlpha(150) : const Color(0x4D2B2B2B)),
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => setState(() => _open = !_open),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  _BookCover(t.bookId, t.title),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(t.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w700)),
+                        Text('Borrowed ${_fmt(t.borrowedOn)}',
+                            style: const TextStyle(
+                                fontSize: 12, color: Palette.textMuted)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _Badge(t.overdue ? 'Overdue' : t.status, color),
+                  Icon(_open ? Icons.expand_less : Icons.expand_more,
+                      size: 20, color: Palette.burgundy),
+                ],
+              ),
+            ),
+          ),
+          if (_open)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: Color(0x1A4A1F1F))),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  row('Borrowed', _fmt(t.borrowedOn)),
+                  row('Due', _fmt(t.due)),
+                  if (t.returned) row('Returned', _fmt(t.returnedOn)),
+                  if (t.fine > 0)
+                    Text(
+                      'Fine: ₱${t.fine.toStringAsFixed(2)} '
+                      '(${t.daysOverdue} ${t.daysOverdue == 1 ? 'day' : 'days'} late)'
+                      '${t.finePaid ? ' · PAID' : ''}',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: t.finePaid ? green : red),
+                    ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: !t.returned
+                        ? FilledButton(
+                            onPressed: widget.onReturn,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: green,
+                              foregroundColor: Colors.white,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            child: const Text('Mark returned'),
+                          )
+                        : (t.fine > 0 && !t.finePaid)
+                            ? FilledButton.tonal(
+                                onPressed: () async {
+                                  final ok = await _confirmDialog(
+                                      context,
+                                      'Mark Fine as Paid',
+                                      'Mark the fine of ₱${t.fine.toStringAsFixed(2)} for "${t.title}" (${t.borrower}) as paid?',
+                                      'Yes, mark paid');
+                                  if (!ok || !context.mounted) return;
+                                  final err = await LibraryService.instance
+                                      .payFine(t.id);
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context)
+                                      .showSnackBar(SnackBar(
+                                    content: Text(err ??
+                                        'Fine of ₱${t.fine.toStringAsFixed(2)} marked as paid.'),
+                                  ));
+                                },
+                                child: const Text('Mark fine paid'),
+                              )
+                            : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -2102,17 +2476,13 @@ class _StudentCard extends StatelessWidget {
 
     return Card(
       elevation: 0,
-      color: Palette.card,
-      shape: _cardShape,
+      color: Colors.white,
+      shape: _tableCardShape,
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
+        hoverColor: const Color(0xFFFAF6F0),
         onTap: onTap,
-        leading: CircleAvatar(
-          backgroundColor: Palette.burgundy,
-          child: Text(student.initial,
-              style: const TextStyle(
-                  color: Palette.creamLight, fontWeight: FontWeight.w700)),
-        ),
+        leading: _UserAvatar(student, radius: 20),
         title: Text(student.fullName,
             style: const TextStyle(fontWeight: FontWeight.w700)),
         subtitle: Text('${student.email}\n${student.phone}'),
@@ -2120,12 +2490,13 @@ class _StudentCard extends StatelessWidget {
         trailing: Column(
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            _Badge('${active.length}/${LibraryService.maxActiveLoans} books',
-                Palette.burgundy),
+            _SolidPill('${active.length}/${LibraryService.maxActiveLoans} books',
+                _loanTone(active.length)),
             if (overdue > 0) ...[
               const SizedBox(height: 4),
-              _Badge('$overdue overdue', const Color(0xFFC0121F)),
+              _SolidPill('$overdue overdue', const Color(0xFFC0121F)),
             ],
           ],
         ),
@@ -2134,8 +2505,8 @@ class _StudentCard extends StatelessWidget {
   }
 }
 
-class _StudentSheet extends StatelessWidget {
-  const _StudentSheet({
+class _StudentDialog extends StatelessWidget {
+  const _StudentDialog({
     required this.email,
     required this.onReturn,
     required this.onIssue,
@@ -2153,82 +2524,200 @@ class _StudentSheet extends StatelessWidget {
         final s = lib.studentByEmail(email);
         if (s == null) return const SizedBox.shrink();
         final records = lib.recordsOf(email);
+        final activeCount = lib.activeLoansOf(email).length;
         final problem = lib.eligibility(s);
         final fines = lib.finesOutstanding(email);
+        final faculty = _isFaculty(s);
+        const red = Color(0xFFC0121F);
+        const green = Color(0xFF0C7A43);
 
-        return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(s.fullName,
-                        style: const TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w700)),
+        final info = <(String, String)>[
+          ('ID number', s.idNumber),
+          ('Phone number', s.phone),
+          if (faculty)
+            ('Department', s.department)
+          else ...[
+            ('Course', s.course),
+            ('Year level', s.yearLevel),
+          ],
+        ];
+
+        return Dialog(
+          backgroundColor: Colors.white,
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: Stack(
+              children: [
+                SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header: photo, name, role, email
+                      Padding(
+                        padding: const EdgeInsets.only(right: 36),
+                        child: Row(
+                          children: [
+                            _UserAvatar(s, radius: 36),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(s.fullName,
+                                      style: const TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w700,
+                                          color: Palette.burgundy,
+                                          height: 1.2)),
+                                  const SizedBox(height: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Palette.burgundy.withAlpha(25),
+                                      borderRadius: BorderRadius.circular(99),
+                                    ),
+                                    child: Text(
+                                        faculty ? 'Professor' : 'Student',
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: Palette.burgundy)),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(s.email,
+                                      style: const TextStyle(
+                                          color: Palette.textMuted,
+                                          fontSize: 13)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // ID / phone / department or course + year
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                              color: Palette.burgundy.withAlpha(50)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          children: [
+                            for (var i = 0; i < info.length; i++)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 10),
+                                decoration: BoxDecoration(
+                                  border: i == info.length - 1
+                                      ? null
+                                      : Border(
+                                          bottom: BorderSide(
+                                              color: Palette.burgundy
+                                                  .withAlpha(25))),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(info[i].$1,
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            color: Palette.textMuted)),
+                                    Text(
+                                        info[i].$2.isEmpty ? '-' : info[i].$2,
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w600)),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Eligibility
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: (problem == null ? green : red).withAlpha(25),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(problem ?? 'Eligible to borrow',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: problem == null ? green : red)),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Borrowing limit pill
+                      Row(
+                        children: [
+                          const Text('Borrowing limit: ',
+                              style: TextStyle(fontWeight: FontWeight.w600)),
+                          _SolidPill(
+                              '$activeCount/${LibraryService.maxActiveLoans} books',
+                              _loanTone(activeCount)),
+                        ],
+                      ),
+                      if (fines > 0) ...[
+                        const SizedBox(height: 8),
+                        Text('Outstanding fines: ₱${fines.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                color: red, fontWeight: FontWeight.w700)),
+                      ],
+                      const SizedBox(height: 12),
+
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: () => onIssue(s),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Palette.amber,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          child: const Text('+ Issue a book'),
+                        ),
+                      ),
+
+                      // Records (paged, 3 per page)
+                      const SizedBox(height: 20),
+                      const Text('Borrowing records',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 10),
+                      if (records.isEmpty)
+                        const Text('No borrowing records yet.',
+                            style: TextStyle(color: Palette.textMuted))
+                      else
+                        _PagedTxList(records: records, onReturn: onReturn),
+                    ],
                   ),
-                  IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close)),
-                ],
-              ),
-              Text('${s.email} · ${s.phone}',
-                  style: const TextStyle(color: Palette.textMuted)),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: (problem == null
-                          ? const Color(0xFF0C7A43)
-                          : const Color(0xFFC0121F))
-                      .withAlpha(30),
-                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(
-                  problem == null ? 'Eligible to borrow' : problem,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: problem == null
-                        ? const Color(0xFF0C7A43)
-                        : const Color(0xFFC0121F),
+
+                // Close button
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, size: 18),
+                    style: IconButton.styleFrom(
+                        backgroundColor: Colors.black.withAlpha(13)),
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                  'Borrowing limit: ${lib.activeLoansOf(email).length}/${LibraryService.maxActiveLoans} books',
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-              if (fines > 0) ...[
-                const SizedBox(height: 8),
-                Text('Outstanding fines: ₱${fines.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                        color: Color(0xFFC0121F), fontWeight: FontWeight.w700)),
               ],
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () => onIssue(s),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Issue a book'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Palette.burgundy,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text('Borrowing records',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 10),
-              if (records.isEmpty)
-                const Text('No borrowing records yet.',
-                    style: TextStyle(color: Palette.textMuted))
-              else
-                _PagedTxList(records: records, onReturn: onReturn),
-            ],
+            ),
           ),
         );
       },
@@ -3753,8 +4242,9 @@ class _ResultTile extends StatelessWidget {
 const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 class _BorrowChart extends StatelessWidget {
-  const _BorrowChart({required this.transactions});
+  const _BorrowChart({required this.transactions, this.requests = const []});
   final List<BookTransaction> transactions;
+  final List<LoanRequest> requests;
 
   @override
   Widget build(BuildContext context) {
@@ -3766,110 +4256,103 @@ class _BorrowChart extends StatelessWidget {
     final days = List.generate(7, (i) {
       final d = today.subtract(Duration(days: 6 - i));
       return (
-        label: _weekdays[d.weekday - 1],
+        label: '${_weekdays[d.weekday - 1]} ${d.day}',
         borrowed: transactions.where((t) => sameDay(t.borrowedOn, d)).length,
         returned: transactions.where((t) => sameDay(t.returnedOn, d)).length,
+        pending: requests.where((r) => sameDay(r.requestedOn, d)).length,
+        overdue: transactions
+            .where((t) => sameDay(t.due, d) && (t.overdue || t.fine > 0))
+            .length,
       );
     });
 
-    var max = 1;
-    var totalB = 0;
-    var totalR = 0;
-    for (final d in days) {
-      if (d.borrowed > max) max = d.borrowed;
-      if (d.returned > max) max = d.returned;
-      totalB += d.borrowed;
-      totalR += d.returned;
-    }
+    final borrowed = [for (final d in days) d.borrowed.toDouble()];
+    final returned = [for (final d in days) d.returned.toDouble()];
+    final pending = [for (final d in days) d.pending.toDouble()];
+    final overdue = [for (final d in days) d.overdue.toDouble()];
+    double sum(List<double> l) => l.fold(0, (s, v) => s + v);
 
-    const borrowedColor = Palette.burgundy;
-    const returnedColor = Color(0xFF0C7A43);
+    const cBorrowed = Color(0xFF433429);
+    const cReturned = Color(0xFF0C7A43);
+    const cPending = Color(0xFFEAB308);
+    const cOverdue = Color(0xFFC0121F);
 
-    Widget bar(int n, Color c) => Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('$n',
-                style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: n == 0 ? Colors.transparent : c)),
-            const SizedBox(height: 2),
-            Container(
-              width: 14,
-              height: n == 0 ? 3 : (n / max * 44).clamp(6, 44).toDouble(),
-              decoration: BoxDecoration(
-                color: n == 0 ? c.withAlpha(50) : c,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(3)),
-              ),
+    final maxY = math.max(
+        [...borrowed, ...returned, ...pending, ...overdue].reduce(math.max),
+        1.0);
+
+    Widget stat(String label, double v, Color c) => Expanded(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: c, width: 2),
             ),
-          ],
-        );
-
-    Widget legend(Color c, String text) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                    color: c, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(width: 6),
-            Text(text,
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600)),
-          ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: c)),
+                Text('${v.toInt()}',
+                    style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF1B1B1B))),
+              ],
+            ),
+          ),
         );
 
     return Card(
       elevation: 0,
-      color: Palette.card,
-      shape: _cardShape,
+      color: Colors.white,
+      shape: _tableCardShape,
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        padding: const EdgeInsets.fromLTRB(11, 14, 14, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                legend(borrowedColor, 'Borrowed ($totalB)'),
-                const SizedBox(width: 16),
-                legend(returnedColor, 'Returned ($totalR)'),
-                const Spacer(),
-                const Text('Last 7 days',
-                    style: TextStyle(fontSize: 12, color: Palette.textMuted)),
-              ],
+            Row(children: [
+              stat('Borrowed', sum(borrowed), cBorrowed),
+              stat('Returned', sum(returned), cReturned),
+              stat('Pending', sum(pending), cPending),
+              stat('Overdue', sum(overdue), cOverdue),
+            ]),
+            const SizedBox(height: 6),
+            const Padding(
+              padding: EdgeInsets.only(left: 3),
+              child: Text('Last 7 days',
+                  style: TextStyle(fontSize: 12, color: Palette.textMuted)),
             ),
             const SizedBox(height: 10),
-            const Divider(height: 1, color: Color(0x2655161D)),
-            const SizedBox(height: 10),
+            SizedBox(
+              height: 170,
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: _MultiLinePainter(
+                  [borrowed, returned, pending, overdue],
+                  const [cBorrowed, cReturned, cPending, cOverdue],
+                  maxY,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
             Row(
               children: [
                 for (final d in days)
                   Expanded(
-                    child: Column(
-                      children: [
-                        SizedBox(
-                          height: 66,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              bar(d.borrowed, borrowedColor),
-                              const SizedBox(width: 3),
-                              bar(d.returned, returnedColor),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(d.label,
-                            style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Palette.textMuted)),
-                      ],
-                    ),
+                    child: Text(d.label,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 9.5, color: Palette.textMuted)),
                   ),
               ],
             ),
@@ -3880,47 +4363,126 @@ class _BorrowChart extends StatelessWidget {
   }
 }
 
+class _MultiLinePainter extends CustomPainter {
+  _MultiLinePainter(this.series, this.colors, this.maxY);
+  final List<List<double>> series;
+  final List<Color> colors;
+  final double maxY;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const padY = 8.0;
+    final h = size.height - padY * 2;
+    double yOf(double v) => padY + h - (v / maxY) * h;
+
+    final grid = Paint()
+      ..color = const Color(0xFFF3F4F6)
+      ..strokeWidth = 1;
+    for (var i = 0; i <= 4; i++) {
+      final y = padY + h * i / 4;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
+    }
+
+    for (var s = 0; s < series.length; s++) {
+      final v = series[s];
+      final n = v.length;
+      double xOf(int i) =>
+          n == 1 ? size.width / 2 : (i + 0.5) / n * size.width;
+
+      final line = Path();
+      for (var i = 0; i < n; i++) {
+        final p = Offset(xOf(i), yOf(v[i]));
+        i == 0 ? line.moveTo(p.dx, p.dy) : line.lineTo(p.dx, p.dy);
+      }
+      final fill = Path.from(line)
+        ..lineTo(xOf(n - 1), padY + h)
+        ..lineTo(xOf(0), padY + h)
+        ..close();
+      canvas.drawPath(fill, Paint()..color = colors[s].withAlpha(22));
+      canvas.drawPath(
+          line,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.4
+            ..strokeJoin = StrokeJoin.round
+            ..color = colors[s]);
+      for (var i = 0; i < n; i++) {
+        canvas.drawCircle(
+            Offset(xOf(i), yOf(v[i])), 3, Paint()..color = colors[s]);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MultiLinePainter old) => true;
+}
+
 // ---------- Desk widgets ----------
 
 class _QuickAction extends StatelessWidget {
-  const _QuickAction(
-      {required this.icon,
-      required this.label,
-      required this.onTap,
-      this.badge = 0});
+  const _QuickAction({
+    required this.icon,
+    required this.label,
+    required this.sub,
+    required this.onTap,
+    this.badge = 0,
+  });
   final IconData icon;
   final String label;
+  final String sub;
   final VoidCallback onTap;
   final int badge;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: Palette.burgundy,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Palette.amber, width: 1.2),
-        ),
-        child: Column(
-          children: [
-            Badge(
-              isLabelVisible: badge > 0,
-              label: Text('$badge'),
-              child: Icon(icon, color: Palette.cream, size: 24),
-            ),
-            const SizedBox(height: 6),
-            Text(label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    color: Palette.creamLight,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600)),
-          ],
+    return Material(
+      color: Palette.card,
+      shape: _cardShape,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: _cardShape,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Badge(
+                isLabelVisible: badge > 0,
+                label: Text('$badge'),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Palette.burgundy,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: Palette.amber, size: 20),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Palette.burgundy,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800)),
+                    Text(sub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Palette.textMuted, fontSize: 11)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right,
+                  size: 18, color: Palette.burgundy.withAlpha(100)),
+            ],
+          ),
         ),
       ),
     );
@@ -3942,45 +4504,47 @@ class _StatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Palette.burgundy.withAlpha(50)),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withAlpha(13)),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x0F000000), blurRadius: 8, offset: Offset(0, 2)),
+        ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-                color: Colors.white.withAlpha(150), shape: BoxShape.circle),
-            child: Icon(icon, color: Palette.burgundy, size: 20),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(value,
-                      style: const TextStyle(
-                          fontFamily: 'Georgia',
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          color: Palette.burgundy)),
-                ),
-                Text(label,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(label.toUpperCase(),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 11.5,
-                        height: 1.1,
-                        fontWeight: FontWeight.w600)),
-              ],
-            ),
+                        fontSize: 10.5,
+                        height: 1.2,
+                        letterSpacing: 0.6,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xB31B1B1B))),
+              ),
+              const SizedBox(width: 6),
+              Icon(icon, size: 18, color: Palette.burgundy.withAlpha(150)),
+            ],
+          ),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value,
+                style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1B1B1B),
+                    fontFeatures: [FontFeature.tabularFigures()])),
           ),
         ],
       ),
@@ -4418,4 +4982,1020 @@ class _RequestsScreenState extends State<_RequestsScreen> {
       ),
     );
   }
+}
+
+// ---------- Analytics (Overview) ----------
+
+const _shortMonths = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+const _chartColors = [
+  Color(0xFF55161D), Color(0xFFEEA51C), Color(0xFF0C7A43), Color(0xFF0B4A8B),
+  Color(0xFFC0121F), Color(0xFF7C3AED), Color(0xFF0E7490), Color(0xFF9CA3AF),
+];
+
+class _AnRec {
+  _AnRec(this.date, this.bookId, this.title, this.category, this.sub,
+      this.email, this.dept, this.faculty);
+  final DateTime date;
+  final int bookId;
+  final String title, category, sub, email, dept;
+  final bool faculty;
+}
+
+class _ChartRow {
+  _ChartRow(this.label, this.value, [this.sub = '']);
+  final String label;
+  final double value;
+  final String sub;
+}
+
+List<_ChartRow> _tally(Iterable<_AnRec> list, String Function(_AnRec) key) {
+  final m = <String, int>{};
+  for (final r in list) {
+    final k = key(r);
+    if (k.isNotEmpty) m[k] = (m[k] ?? 0) + 1;
+  }
+  final out = [for (final e in m.entries) _ChartRow(e.key, e.value.toDouble())];
+  out.sort((a, b) {
+    final c = b.value.compareTo(a.value);
+    return c != 0 ? c : a.label.compareTo(b.label);
+  });
+  return out;
+}
+
+String _deptOf(AppUser? u) {
+  if (u == null) return 'Unassigned';
+  final d = (_isFaculty(u) ? u.department : u.course).trim();
+  return d.isEmpty ? 'Unassigned' : d;
+}
+
+String _dayLabel(DateTime d) => '${_shortMonths[d.month - 1]} ${d.day}';
+
+class _Bucket {
+  _Bucket(this.start, this.end, this.label);
+  final DateTime start, end;
+  final String label;
+}
+
+class _AnalyticsSection extends StatefulWidget {
+  const _AnalyticsSection();
+
+  @override
+  State<_AnalyticsSection> createState() => _AnalyticsSectionState();
+}
+
+class _AnalyticsSectionState extends State<_AnalyticsSection> {
+  static const _ranges = {
+    'day': 'Today',
+    'week': 'Last 7 days',
+    'month': 'Last 30 days',
+    'year': 'Last 12 months',
+    'custom': 'Custom',
+  };
+
+  String _range = 'month';
+  DateTimeRange? _custom;
+  String _bookTop = '5', _bookCat = 'All', _bookSub = 'All';
+  String _subTop = '5', _subCat = 'All';
+  String _trendCat = 'All', _trendDept = 'All';
+  String _deptCat = 'All';
+  String _role = 'all';
+
+  DateTime _d(DateTime x) => DateTime(x.year, x.month, x.day);
+
+  (DateTime, DateTime) _resolve() {
+    final today = _d(DateTime.now());
+    switch (_range) {
+      case 'week':
+        return (today.subtract(const Duration(days: 6)), today);
+      case 'month':
+        return (today.subtract(const Duration(days: 29)), today);
+      case 'year':
+        return (today.subtract(const Duration(days: 364)), today);
+      case 'custom':
+        final c = _custom;
+        return c == null
+            ? (today.subtract(const Duration(days: 29)), today)
+            : (_d(c.start), _d(c.end));
+      default:
+        return (today, today);
+    }
+  }
+
+  Future<void> _pickRange() async {
+    final now = DateTime.now();
+    final r = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: now,
+      initialDateRange: _custom ??
+          DateTimeRange(
+              start: now.subtract(const Duration(days: 29)), end: now),
+    );
+    if (r != null) setState(() => _custom = r);
+  }
+
+  (List<_Bucket>, String) _buckets(DateTime start, DateTime end) {
+    final span = end.difference(start).inDays + 1;
+    final out = <_Bucket>[];
+    if (span <= 31) {
+      for (var i = 0; i < span; i++) {
+        final d = start.add(Duration(days: i));
+        out.add(_Bucket(d, d, _dayLabel(d)));
+      }
+      return (out, 'Daily');
+    }
+    if (span <= 120) {
+      for (var s = start; !s.isAfter(end); s = s.add(const Duration(days: 7))) {
+        final e = s.add(const Duration(days: 6));
+        out.add(_Bucket(s, e.isAfter(end) ? end : e, _dayLabel(s)));
+      }
+      return (out, 'Weekly');
+    }
+    var y = start.year, m = start.month;
+    for (var guard = 0; guard < 240; guard++) {
+      final first = DateTime(y, m, 1);
+      if (first.isAfter(end)) break;
+      final last = DateTime(y, m + 1, 0);
+      out.add(_Bucket(first.isBefore(start) ? start : first,
+          last.isAfter(end) ? end : last,
+          "${_shortMonths[m - 1]} '${y % 100}"));
+      m++;
+      if (m > 12) {
+        m = 1;
+        y++;
+      }
+    }
+    return (out, 'Monthly');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lib = LibraryService.instance;
+    final books = lib.books;
+    final students = AuthService.instance.borrowers;
+    final booksById = {for (final b in books) b.id: b};
+    final usersByEmail = {for (final s in students) s.email: s};
+
+    final (start, end) = _resolve();
+
+    final all = <_AnRec>[];
+    for (final t in lib.transactions) {
+      final on = t.borrowedOn;
+      if (on == null) continue;
+      final b = booksById[t.bookId];
+      final u = usersByEmail[t.borrowerEmail];
+      all.add(_AnRec(
+        _d(on),
+        t.bookId,
+        t.title,
+        (b?.category.isNotEmpty ?? false) ? b!.category : 'Uncategorized',
+        b?.subcategory ?? '',
+        t.borrowerEmail,
+        _deptOf(u),
+        u != null && _isFaculty(u),
+      ));
+    }
+    final scoped = all
+        .where((r) => !r.date.isBefore(start) && !r.date.isAfter(end))
+        .toList();
+
+    List<String> subsOf(String cat) => {
+          for (final b in books)
+            if ((cat == 'All' || b.category == cat) && b.subcategory.isNotEmpty)
+              b.subcategory
+        }.toList()
+          ..sort();
+    final allDepts = {for (final r in all) r.dept}.toList()..sort();
+
+    // 1. Top borrowed books
+    final topBooks = _tally(
+        scoped.where((r) =>
+            (_bookCat == 'All' || r.category == _bookCat) &&
+            (_bookSub == 'All' || r.sub == _bookSub)),
+        (r) => r.title).take(int.parse(_bookTop)).toList();
+
+    // 2. Category
+    final byCategory = _tally(scoped, (r) => r.category);
+
+    // 3. Subcategory
+    final bySub = _tally(
+        scoped.where((r) => _subCat == 'All' || r.category == _subCat),
+        (r) => r.sub).take(int.parse(_subTop)).toList();
+
+    // 4. Trend
+    final (buckets, unit) = _buckets(start, end);
+    final trendRows = scoped.where((r) =>
+        (_trendCat == 'All' || r.category == _trendCat) &&
+        (_trendDept == 'All' || r.dept == _trendDept));
+    final trendValues = [
+      for (final b in buckets)
+        trendRows
+            .where((r) => !r.date.isBefore(b.start) && !r.date.isAfter(b.end))
+            .length
+            .toDouble()
+    ];
+    final trendTotal = trendValues.fold<double>(0, (s, v) => s + v);
+
+    // 5. Department borrowing
+    final byDept = _tally(
+        scoped.where((r) => _deptCat == 'All' || r.category == _deptCat),
+        (r) => r.dept);
+
+    // 6. Unique borrowers by department
+    final uniq = <String, Set<String>>{};
+    for (final r in scoped) {
+      uniq.putIfAbsent(r.dept, () => {}).add(r.email);
+    }
+    final uniqueByDept = [
+      for (final e in uniq.entries)
+        _ChartRow(e.key, e.value.length.toDouble())
+    ]..sort((a, b) {
+        final c = b.value.compareTo(a.value);
+        return c != 0 ? c : a.label.compareTo(b.label);
+      });
+
+    // 7. Engagement
+    bool roleOk(bool faculty) =>
+        _role == 'all' || (_role == 'faculty') == faculty;
+    final eligible = <String, int>{};
+    for (final s in students) {
+      if (!roleOk(_isFaculty(s))) continue;
+      final d = _deptOf(s);
+      if (d != 'Unassigned') eligible[d] = (eligible[d] ?? 0) + 1;
+    }
+    final borrowersIn = <String, Set<String>>{};
+    for (final r in scoped.where((r) => roleOk(r.faculty))) {
+      borrowersIn.putIfAbsent(r.dept, () => {}).add(r.email);
+    }
+    final engagement = [
+      for (final e in eligible.entries)
+        () {
+          final b = borrowersIn[e.key]?.length ?? 0;
+          return _ChartRow(e.key, (b / e.value * 1000).round() / 10,
+              '($b of ${e.value})');
+        }()
+    ]..sort((a, b) {
+        final c = b.value.compareTo(a.value);
+        return c != 0 ? c : a.label.compareTo(b.label);
+      });
+
+    final kpis = [
+      ('Borrowing transactions', scoped.length),
+      ('Unique borrowers', {for (final r in scoped) r.email}.length),
+      ('Different books borrowed', {for (final r in scoped) r.bookId}.length),
+    ];
+
+    final rangeText = start == end
+        ? _fmt(start)
+        : '${_fmt(start)} to ${_fmt(end)}';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(rangeText,
+            style: const TextStyle(color: Palette.textMuted, fontSize: 13)),
+        const SizedBox(height: 10),
+
+        // Date range pills
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Palette.cream.withAlpha(110),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Palette.burgundy.withAlpha(40)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final e in _ranges.entries)
+                    ChoiceChip(
+                      label: Text(e.value),
+                      selected: _range == e.key,
+                      showCheckmark: false,
+                      backgroundColor: Colors.white,
+                      selectedColor: Palette.burgundy,
+                      side: BorderSide(
+                          color: Palette.burgundy
+                              .withAlpha(_range == e.key ? 255 : 70)),
+                      labelStyle: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color:
+                            _range == e.key ? Colors.white : Palette.burgundy,
+                      ),
+                      onSelected: (_) {
+                        setState(() => _range = e.key);
+                        if (e.key == 'custom' && _custom == null) _pickRange();
+                      },
+                    ),
+                ],
+              ),
+              if (_range == 'custom')
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: OutlinedButton.icon(
+                    onPressed: _pickRange,
+                    icon: const Icon(Icons.date_range, size: 18),
+                    label: const Text('Change dates'),
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: Palette.burgundy),
+                  ),
+                ),
+              const SizedBox(height: 6),
+              const Text(
+                  'The date range applies to every chart below and uses the borrow date.',
+                  style: TextStyle(fontSize: 11.5, color: Palette.textMuted)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // KPIs
+        for (final k in kpis)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE4F1EE),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.black.withAlpha(13)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(k.$1.toUpperCase(),
+                      style: const TextStyle(
+                          fontSize: 11,
+                          letterSpacing: 0.6,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xB31B1B1B))),
+                ),
+                Text('${k.$2}',
+                    style: const TextStyle(
+                        fontSize: 26, fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ),
+        const SizedBox(height: 6),
+
+        _ChartCard(
+          title: 'Borrowing Trends Over Time',
+          purpose:
+              '$unit borrowing transactions. Shows patterns, seasonal demand and busy periods.',
+          controls: [
+            _MiniSelect(
+              value: _trendCat,
+              items: {'All': 'All categories', for (final c in _categories) c: c},
+              onChanged: (v) => setState(() => _trendCat = v),
+            ),
+            _MiniSelect(
+              value: _trendDept,
+              items: {'All': 'All departments', for (final d in allDepts) d: d},
+              onChanged: (v) => setState(() => _trendDept = v),
+            ),
+          ],
+          child: trendTotal == 0
+              ? const _EmptyChart()
+              : _TrendLine(
+                  labels: [for (final b in buckets) b.label],
+                  values: trendValues),
+        ),
+
+        _ChartCard(
+          title: 'Top Borrowed Books',
+          purpose: 'Popular titles. Helps decide which books need more copies.',
+          controls: [
+            _MiniSelect(
+              value: _bookCat,
+              items: {'All': 'All categories', for (final c in _categories) c: c},
+              onChanged: (v) => setState(() {
+                _bookCat = v;
+                _bookSub = 'All';
+              }),
+            ),
+            _MiniSelect(
+              value: subsOf(_bookCat).contains(_bookSub) ? _bookSub : 'All',
+              items: {
+                'All': 'All subcategories',
+                for (final s in subsOf(_bookCat)) s: s
+              },
+              onChanged: (v) => setState(() => _bookSub = v),
+            ),
+            _MiniSelect(
+              value: _bookTop,
+              items: const {'5': 'Top 5', '10': 'Top 10'},
+              onChanged: (v) => setState(() => _bookTop = v),
+            ),
+          ],
+          child: _HBars(rows: topBooks, color: Palette.burgundy),
+        ),
+
+        _ChartCard(
+          title: 'Borrowing by Category',
+          purpose:
+              'Most borrowed subject areas, highest to lowest. Guides collection development.',
+          child: _Donut(rows: byCategory),
+        ),
+
+        _ChartCard(
+          title: 'Borrowing by Subcategory',
+          purpose:
+              'Specific subjects in high demand. Books without a subcategory are not counted.',
+          controls: [
+            _MiniSelect(
+              value: _subCat,
+              items: {'All': 'All categories', for (final c in _categories) c: c},
+              onChanged: (v) => setState(() => _subCat = v),
+            ),
+            _MiniSelect(
+              value: _subTop,
+              items: const {'5': 'Top 5', '10': 'Top 10'},
+              onChanged: (v) => setState(() => _subTop = v),
+            ),
+          ],
+          child: _HBars(rows: bySub, color: Palette.amber),
+        ),
+
+        _ChartCard(
+          title: 'Borrowing by Academic Department',
+          purpose: 'Which departments generate the most borrowing transactions.',
+          controls: [
+            _MiniSelect(
+              value: _deptCat,
+              items: {'All': 'All categories', for (final c in _categories) c: c},
+              onChanged: (v) => setState(() => _deptCat = v),
+            ),
+          ],
+          child: _Donut(rows: byDept),
+        ),
+
+        _ChartCard(
+          title: 'Unique Borrowers by Department',
+          purpose:
+              'Distinct people who borrowed at least once. Repeat loans count once.',
+          child: _VBars(rows: uniqueByDept, color: const Color(0xFF0C7A43)),
+        ),
+
+        _ChartCard(
+          title: 'Borrowing Engagement by Department',
+          purpose:
+              'Share of registered users in each department who borrowed at least one book.',
+          controls: [
+            _MiniSelect(
+              value: _role,
+              items: const {
+                'all': 'All users',
+                'student': 'Students',
+                'faculty': 'Faculty'
+              },
+              onChanged: (v) => setState(() => _role = v),
+            ),
+          ],
+          child: _VBars(
+            rows: engagement,
+            color: Palette.burgundy,
+            suffix: '%',
+            fixedMax: 100,
+            empty: 'No registered users with a department match these filters.',
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChartCard extends StatelessWidget {
+  const _ChartCard({
+    required this.title,
+    required this.purpose,
+    required this.child,
+    this.controls = const [],
+  });
+  final String title, purpose;
+  final List<Widget> controls;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      shape: _cardShape,
+      margin: const EdgeInsets.only(bottom: 14),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: Palette.burgundy)),
+            const SizedBox(height: 2),
+            Text(purpose,
+                style:
+                    const TextStyle(fontSize: 12, color: Palette.textMuted)),
+            if (controls.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(spacing: 8, runSpacing: 8, children: controls),
+            ],
+            const SizedBox(height: 14),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniSelect extends StatelessWidget {
+  const _MiniSelect(
+      {required this.value, required this.items, required this.onChanged});
+  final String value;
+  final Map<String, String> items;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 36,
+      constraints: const BoxConstraints(minWidth: 100, maxWidth: 156),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Palette.burgundy.withAlpha(60)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: items.containsKey(value) ? value : items.keys.first,
+          isDense: true,
+          isExpanded: true,
+          style: const TextStyle(fontSize: 12.5, color: Palette.textDark),
+          items: [
+            for (final e in items.entries)
+              DropdownMenuItem(
+                  value: e.key,
+                  child: Text(e.value, overflow: TextOverflow.ellipsis)),
+          ],
+          onChanged: (v) {
+            if (v != null) onChanged(v);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyChart extends StatelessWidget {
+  const _EmptyChart([this.text]);
+  final String? text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        height: 120,
+        width: double.infinity,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Palette.cream.withAlpha(110),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+            text ?? 'No borrowing records match the selected filters.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Palette.textMuted, fontSize: 13)),
+      );
+}
+
+String _cut(String s, int n) => s.length > n ? '${s.substring(0, n - 1)}…' : s;
+
+String _num(double v, String suffix) =>
+    '${v == v.roundToDouble() ? v.toInt() : v}$suffix';
+
+// Horizontal bars
+class _HBars extends StatelessWidget {
+  const _HBars({required this.rows, required this.color});
+  final List<_ChartRow> rows;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    if (rows.isEmpty) return const _EmptyChart();
+    final top = rows.map((r) => r.value).reduce(math.max);
+    return Column(
+      children: [
+        for (final r in rows)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 110,
+                  child: Text(_cut(r.label, 20),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 12, color: Palette.textDark)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Container(
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: Palette.cream.withAlpha(150),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    alignment: Alignment.centerLeft,
+                    child: FractionallySizedBox(
+                      widthFactor: (r.value / (top * 1.1)).clamp(0.03, 1.0),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(colors: [
+                            color.withAlpha(140),
+                            color,
+                          ]),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 28,
+                  child: Text(_num(r.value, ''),
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Palette.burgundy)),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// Vertical bars (scrolls sideways when there are many)
+class _VBars extends StatelessWidget {
+  const _VBars({
+    required this.rows,
+    required this.color,
+    this.suffix = '',
+    this.fixedMax,
+    this.empty,
+  });
+  final List<_ChartRow> rows;
+  final Color color;
+  final String suffix;
+  final double? fixedMax;
+  final String? empty;
+
+  @override
+  Widget build(BuildContext context) {
+    if (rows.isEmpty) return _EmptyChart(empty);
+    final top = fixedMax ?? rows.map((r) => r.value).reduce(math.max) * 1.1;
+    const chartH = 150.0;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          for (final r in rows)
+            SizedBox(
+              width: 64,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(_num(r.value, suffix),
+                      style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: Palette.burgundy)),
+                  const SizedBox(height: 3),
+                  Container(
+                    width: 30,
+                    height: top <= 0
+                        ? 3
+                        : (r.value / top * chartH).clamp(3, chartH).toDouble(),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [color, color.withAlpha(140)],
+                      ),
+                      borderRadius:
+                          const BorderRadius.vertical(top: Radius.circular(8)),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 44,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Text(_cut(r.label, 18),
+                          textAlign: TextAlign.center,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 10.5, color: Palette.textMuted)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// Doughnut with total in the center and a legend
+class _Donut extends StatelessWidget {
+  const _Donut({required this.rows});
+  final List<_ChartRow> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    if (rows.isEmpty) return const _EmptyChart();
+    const maxSlices = 7;
+    final data = rows.length > maxSlices
+        ? [
+            ...rows.take(maxSlices),
+            _ChartRow('Others',
+                rows.skip(maxSlices).fold<double>(0, (s, r) => s + r.value)),
+          ]
+        : rows;
+    final total = data.fold<double>(0, (s, r) => s + r.value);
+
+    return Column(
+      children: [
+        SizedBox(
+          height: 190,
+          width: 190,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              CustomPaint(
+                size: const Size(190, 190),
+                painter: _DonutPainter(
+                    [for (final r in data) r.value], _chartColors),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_num(total, ''),
+                      style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: Palette.burgundy)),
+                  const Text('TRANSACTIONS',
+                      style: TextStyle(
+                          fontSize: 9.5,
+                          letterSpacing: 0.6,
+                          fontWeight: FontWeight.w700,
+                          color: Palette.textMuted)),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        for (var i = 0; i < data.length; i++)
+          Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Palette.cream.withAlpha(110),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                      color: _chartColors[i % _chartColors.length],
+                      shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(data[i].label,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+                Text(_num(data[i].value, ''),
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Palette.burgundy)),
+                SizedBox(
+                  width: 42,
+                  child: Text('${(data[i].value / total * 100).round()}%',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                          fontSize: 12, color: Palette.textMuted)),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _DonutPainter extends CustomPainter {
+  _DonutPainter(this.values, this.colors);
+  final List<double> values;
+  final List<Color> colors;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final total = values.fold<double>(0, (s, v) => s + v);
+    if (total <= 0) return;
+    final stroke = size.width * 0.17;
+    final rect = (Offset.zero & size).deflate(stroke / 2);
+    final gap = values.length > 1 ? 0.05 : 0.0;
+    var start = -math.pi / 2;
+    for (var i = 0; i < values.length; i++) {
+      final sweep = values[i] / total * math.pi * 2;
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = colors[i % colors.length];
+      canvas.drawArc(rect, start + gap / 2, math.max(sweep - gap, 0.01),
+          false, paint);
+      start += sweep;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DonutPainter old) =>
+      old.values != values || old.colors != colors;
+}
+
+// Line chart with average line
+class _TrendLine extends StatelessWidget {
+  const _TrendLine({required this.labels, required this.values});
+  final List<String> labels;
+  final List<double> values;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxY = math.max(values.reduce(math.max), 1.0);
+    final avg = values.fold<double>(0, (s, v) => s + v) / values.length;
+    final mid = labels[labels.length ~/ 2];
+
+    return Column(
+      children: [
+        SizedBox(
+          height: 180,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 24,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_num(maxY, ''),
+                        style: const TextStyle(
+                            fontSize: 10, color: Palette.textMuted)),
+                    const Text('0',
+                        style: TextStyle(
+                            fontSize: 10, color: Palette.textMuted)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: CustomPaint(
+                  painter: _LinePainter(values, maxY, avg),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.only(left: 24),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(labels.first,
+                  style:
+                      const TextStyle(fontSize: 10, color: Palette.textMuted)),
+              if (labels.length > 2)
+                Text(mid,
+                    style: const TextStyle(
+                        fontSize: 10, color: Palette.textMuted)),
+              if (labels.length > 1)
+                Text(labels.last,
+                    style: const TextStyle(
+                        fontSize: 10, color: Palette.textMuted)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(width: 16, height: 3, color: Palette.burgundy),
+            const SizedBox(width: 6),
+            const Text('Borrowings',
+                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 16),
+            Container(width: 16, height: 3, color: const Color(0xFF7C3AED)),
+            const SizedBox(width: 6),
+            Text('Average (${avg.toStringAsFixed(1)})',
+                style: const TextStyle(
+                    fontSize: 11.5, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _LinePainter extends CustomPainter {
+  _LinePainter(this.values, this.maxY, this.avg);
+  final List<double> values;
+  final double maxY, avg;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const padY = 8.0;
+    final h = size.height - padY * 2;
+    double yOf(double v) => padY + h - (v / maxY) * h;
+    double xOf(int i) => values.length == 1
+        ? size.width / 2
+        : i / (values.length - 1) * size.width;
+
+    final grid = Paint()
+      ..color = const Color(0xFFE5E7EB)
+      ..strokeWidth = 1;
+    for (var i = 0; i <= 4; i++) {
+      final y = padY + h * i / 4;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
+    }
+
+    // dashed average line
+    final avgPaint = Paint()
+      ..color = const Color(0xFF7C3AED)
+      ..strokeWidth = 1.5;
+    final ay = yOf(avg);
+    for (var x = 0.0; x < size.width; x += 9) {
+      canvas.drawLine(
+          Offset(x, ay), Offset(math.min(x + 5, size.width), ay), avgPaint);
+    }
+
+    // line
+    final path = Path();
+    for (var i = 0; i < values.length; i++) {
+      final p = Offset(xOf(i), yOf(values[i]));
+      i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+    }
+    canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.6
+          ..strokeJoin = StrokeJoin.round
+          ..color = Palette.burgundy);
+
+    // dots
+    if (values.length <= 31) {
+      for (var i = 0; i < values.length; i++) {
+        final p = Offset(xOf(i), yOf(values[i]));
+        canvas.drawCircle(p, 3.5, Paint()..color = Colors.white);
+        canvas.drawCircle(
+            p,
+            3.5,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2
+              ..color = Palette.burgundy);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _LinePainter old) =>
+      old.values != values || old.maxY != maxY || old.avg != avg;
 }
