@@ -7,6 +7,7 @@ import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/screens/book_details.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
+import 'package:library_management_system_mobile/utils/confirm_dialog.dart';
 
 enum _Filter {
   current('Current', 'borrowed'),
@@ -703,6 +704,13 @@ class _RequestCard extends StatelessWidget {
                   child: FilledButton(
                     onPressed: () async {
                       final messenger = ScaffoldMessenger.of(context);
+                      final ok = await confirmDialog(
+                          context,
+                          'Cancel Request',
+                          'Cancel your request for "${book.title}"?',
+                          'Yes, cancel request',
+                          danger: true);
+                      if (!ok || !context.mounted) return;
                       final err =
                           await BorrowStore.instance.cancelRequest(request);
                       messenger

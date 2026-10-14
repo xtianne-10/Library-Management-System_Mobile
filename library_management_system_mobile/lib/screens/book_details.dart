@@ -6,6 +6,7 @@ import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/globes/favorites_store.dart';
+import 'package:library_management_system_mobile/utils/confirm_dialog.dart';
 
 const _monthNames = [
   'January', 'February', 'March', 'April', 'May', 'June', 'July',
@@ -35,6 +36,12 @@ class BookDetailsScreen extends StatelessWidget {
   Future<void> _toggleFavorite(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     final wasFav = FavoritesStore.instance.isFavorite(book);
+    if (wasFav) {
+      final ok = await confirmDialog(context, 'Remove Favorite',
+          'Remove "${book.title}" from your favorites?', 'Yes, remove',
+          danger: true);
+      if (!ok || !context.mounted) return;
+    }
     final err = await FavoritesStore.instance.toggle(book);
     messenger
       ..hideCurrentSnackBar()
@@ -59,6 +66,9 @@ class BookDetailsScreen extends StatelessWidget {
 
     final me = AuthService.instance.currentUser;
     if (me == null) return;
+    final ok = await confirmDialog(context, 'Borrow This Book',
+        'Send a borrow request for "${book.title}"?', 'Yes, send request');
+    if (!ok || !context.mounted) return;
     final error = await LibraryService.instance.requestBorrow(book, me);
     messenger.showSnackBar(SnackBar(
       content: Text(error ??

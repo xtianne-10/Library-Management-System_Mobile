@@ -6,6 +6,7 @@ import 'package:library_management_system_mobile/app_nav_bar.dart';
 import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/utils/validators.dart';
+import 'package:library_management_system_mobile/utils/confirm_dialog.dart';
 import 'package:library_management_system_mobile/globes/borrow_store.dart';
 import 'package:library_management_system_mobile/globes/favorites_store.dart';
 import 'package:library_management_system_mobile/screens/favorites.dart';
@@ -96,9 +97,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
   }
 
-  void _save() {
+  Future<void> _save() async {
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
+    final ok = await confirmDialog(
+        context, 'Save Changes', 'Save changes to your profile?', 'Yes, save');
+    if (!ok || !mounted) return;
 
     final error = AuthService.instance.updateProfile(
       firstName: _first.text,
@@ -139,6 +143,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (file == null) return;
       final bytes = await file.readAsBytes();
       if (!mounted) return;
+      final ok = await confirmDialog(context, 'Change Photo',
+          'Use this photo as your profile picture?', 'Yes, use it');
+      if (!ok || !mounted) return;
       AuthService.instance.updateAvatar(bytes);
       setState(() {});
       _snack('Profile picture updated.');
@@ -178,8 +185,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 leading: Icon(Icons.delete_outline, color: Colors.red.shade700),
                 title: Text('Remove photo',
                     style: TextStyle(color: Colors.red.shade700)),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(sheetContext);
+                  final ok = await confirmDialog(context, 'Remove Photo',
+                      'Remove your profile picture?', 'Yes, remove',
+                      danger: true);
+                  if (!ok || !mounted) return;
                   AuthService.instance.updateAvatar(null);
                   setState(() {});
                   _snack('Profile picture removed.');
@@ -279,8 +290,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onPressed: () => Navigator.pop(c, false),
               child: const Text('Cancel')),
           FilledButton(
-            onPressed: () {
-              if (key.currentState!.validate()) Navigator.pop(c, true);
+            onPressed: () async {
+              if (!key.currentState!.validate()) return;
+              final yes = await confirmDialog(c, 'Change Password',
+                  'Change your password?', 'Yes, change');
+              if (yes && c.mounted) Navigator.pop(c, true);
             },
             child: const Text('Update'),
           ),

@@ -6,6 +6,7 @@ import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/globes/borrow_store.dart';
 import 'package:library_management_system_mobile/globes/favorites_store.dart';
 import 'package:library_management_system_mobile/screens/book_details.dart';
+import 'package:library_management_system_mobile/utils/confirm_dialog.dart';
 
 const _pageSize = 10;
 const _cardBorder = Color(0x1A000000);
@@ -40,6 +41,10 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
 
   Future<void> _remove(Book book) async {
     final messenger = ScaffoldMessenger.of(context);
+    final ok = await confirmDialog(context, 'Remove Favorite',
+        'Remove "${book.title}" from your favorites?', 'Yes, remove',
+        danger: true);
+    if (!ok || !mounted) return;
     final err = await FavoritesStore.instance.toggle(book);
     messenger
       ..hideCurrentSnackBar()

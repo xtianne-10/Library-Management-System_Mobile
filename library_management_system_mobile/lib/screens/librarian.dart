@@ -11,6 +11,9 @@ import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/utils/validators.dart';
+import 'package:library_management_system_mobile/utils/confirm_dialog.dart';
+
+const _confirmDialog = confirmDialog;
 
 const _categories = ['Fiction', 'Non-Fiction', 'Academic', 'Restricted'];
 
@@ -824,6 +827,9 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       if (file == null) return;
       final bytes = await file.readAsBytes();
       if (!mounted) return;
+      final ok = await _confirmDialog(context, 'Change Photo',
+          'Use this photo as your profile picture?', 'Yes, use it');
+      if (!ok || !mounted) return;
       AuthService.instance.updateAvatar(bytes);
       setState(() {});
       _snack('Profile picture updated.');
@@ -863,8 +869,12 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                 leading: Icon(Icons.delete_outline, color: Colors.red.shade700),
                 title: Text('Remove photo',
                     style: TextStyle(color: Colors.red.shade700)),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(sheetContext);
+                  final ok = await _confirmDialog(context, 'Remove Photo',
+                      'Remove your profile picture?', 'Yes, remove',
+                      danger: true);
+                  if (!ok || !mounted) return;
                   AuthService.instance.updateAvatar(null);
                   setState(() {});
                   _snack('Profile picture removed.');
@@ -921,8 +931,11 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               onPressed: () => Navigator.pop(c, false),
               child: const Text('Cancel')),
           FilledButton(
-            onPressed: () {
-              if (key.currentState!.validate()) Navigator.pop(c, true);
+            onPressed: () async {
+              if (!key.currentState!.validate()) return;
+              final yes = await _confirmDialog(
+                  c, 'Save Profile', 'Save your changes?', 'Yes, save');
+              if (yes && c.mounted) Navigator.pop(c, true);
             },
             child: const Text('Save'),
           ),
@@ -1001,8 +1014,11 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               onPressed: () => Navigator.pop(c, false),
               child: const Text('Cancel')),
           FilledButton(
-            onPressed: () {
-              if (key.currentState!.validate()) Navigator.pop(c, true);
+            onPressed: () async {
+              if (!key.currentState!.validate()) return;
+              final yes = await _confirmDialog(c, 'Change Password',
+                  'Change your password?', 'Yes, change');
+              if (yes && c.mounted) Navigator.pop(c, true);
             },
             child: const Text('Update'),
           ),
@@ -1100,8 +1116,11 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               onPressed: () => Navigator.pop(c, false),
               child: const Text('Cancel')),
           FilledButton(
-            onPressed: () {
-              if (key.currentState!.validate()) Navigator.pop(c, true);
+            onPressed: () async {
+              if (!key.currentState!.validate()) return;
+              final yes = await _confirmDialog(c, 'Add Librarian',
+                  'Create a librarian account for ${first.text.trim()} ${last.text.trim()}?', 'Yes, create');
+              if (yes && c.mounted) Navigator.pop(c, true);
             },
             child: const Text('Create'),
           ),
@@ -1210,6 +1229,13 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
 
   Future<void> _returnTx(BookTransaction t) async {
     if (_returning.contains(t.id)) return; // ignore double taps
+    final late = t.overdue
+        ? '\n\nThis book is ${t.daysOverdue} ${t.daysOverdue == 1 ? 'day' : 'days'} late. '
+            'A fine of ₱${t.fine.toStringAsFixed(2)} will be recorded.'
+        : '';
+    final ok = await _confirmDialog(context, 'Mark as Returned',
+        'Mark "${t.title}" as returned by ${t.borrower}?$late', 'Yes, return');
+    if (!ok || !mounted) return;
     _returning.add(t.id);
     final fine = t.fine;
     final err = await _lib.returnBook(t.id);
@@ -1867,6 +1893,12 @@ class _TxCard extends StatelessWidget {
                 alignment: Alignment.centerRight,
                 child: FilledButton.tonal(
                   onPressed: () async {
+                    final ok = await _confirmDialog(
+                        context,
+                        'Mark Fine as Paid',
+                        'Mark the fine of ₱${t.fine.toStringAsFixed(2)} for "${t.title}" (${t.borrower}) as paid?',
+                        'Yes, mark paid');
+                    if (!ok || !context.mounted) return;
                     final err = await LibraryService.instance.payFine(t.id);
                     if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -2354,7 +2386,7 @@ class _BookFormState extends State<_BookForm> {
     });
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final total = int.parse(_copies.text.trim());
     final borrowed =
@@ -2366,6 +2398,14 @@ class _BookFormState extends State<_BookForm> {
       ));
       return;
     }
+    final ok = await _confirmDialog(
+        context,
+        _editing ? 'Save Changes' : 'Add Book',
+        _editing
+            ? 'Save changes to "${_title.text.trim()}"?'
+            : 'Add "${_title.text.trim()}" to the catalog?',
+        _editing ? 'Yes, save' : 'Yes, add');
+    if (!ok || !mounted) return;
     final base = widget.book ??
         Book(title: '', author: '', category: '', color: Palette.burgundy);
     Navigator.pop(
@@ -2817,6 +2857,13 @@ class _ImportSheetState extends State<_ImportSheet> {
   }
 
   Future<void> _import() async {
+    final count = _valid.length;
+    final ok = await _confirmDialog(
+        context,
+        'Import Books',
+        'Import $count ${count == 1 ? 'book' : 'books'} into the catalog?',
+        'Yes, import');
+    if (!ok || !mounted) return;
     final books = _valid.map((r) => r.book!).toList();
     final n = await LibraryService.instance.addAll(books);
     if (!mounted) return;
