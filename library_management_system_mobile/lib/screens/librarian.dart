@@ -2693,9 +2693,9 @@ class _BookFormState extends State<_BookForm> {
 }
 // ---------- Bulk import ----------
 
-const _csvTemplate = '''title,author,isbn,publisher,category,published,copies,pages,description,image,shelf
-The Hobbit,J.R.R. Tolkien,9780547928227,Allen & Unwin,Fiction,1937-09-21,3,310,A hobbit goes on an unexpected adventure.,,Aisle 1
-A Brief History of Time,Stephen Hawking,9780553380163,Bantam Books,Non-Fiction,1988-04-01,2,212,An introduction to cosmology for general readers.,https://example.com/cover.jpg,Aisle 4
+const _csvTemplate = '''title,author,isbn,publisher,category,published,copies,pages,description,image,subcategory,shelf
+The Hobbit,J.R.R. Tolkien,9780547928227,Allen & Unwin,Fiction,1937-09-21,3,310,A hobbit goes on an unexpected adventure.,,Fantasy,Aisle 1
+A Brief History of Time,Stephen Hawking,9780553380163,Bantam Books,Non-Fiction,1988-04-01,2,212,An introduction to cosmology for general readers.,https://example.com/cover.jpg,Cosmology,Aisle 4
 ''';
 
 /// Minimal CSV parser: handles quotes, commas and line breaks inside quotes.
@@ -2741,13 +2741,29 @@ List<List<String>> _parseCsv(String input) {
   return rows;
 }
 
+enum _RowStatus { newBook, update, duplicate, invalid }
+
+(String, Color, IconData) _statusMeta(_RowStatus s) => switch (s) {
+      _RowStatus.newBook =>
+        ('New', const Color(0xFF0C7A43), Icons.add_circle_outline),
+      _RowStatus.update => ('Update', const Color(0xFF0B4A8B), Icons.sync),
+      _RowStatus.duplicate =>
+        ('Duplicate', const Color(0xFF8A5A00), Icons.content_copy),
+      _RowStatus.invalid =>
+        ('Invalid', const Color(0xFFC0121F), Icons.error_outline),
+    };
+
 class _ImportRow {
   _ImportRow(this.line, this.label);
   final int line; // row number in the file (header = 1)
   final String label;
-  Book? book;
+  Book? book; // data to save (new book, or merged update)
   final errors = <String>[];
-  bool get ok => book != null && errors.isEmpty;
+  final changes = <String>[];
+  String note = '';
+  _RowStatus status = _RowStatus.invalid;
+  bool get ok =>
+      status == _RowStatus.newBook || status == _RowStatus.update;
 }
 
 class _ImportSheet extends StatefulWidget {
@@ -2767,8 +2783,9 @@ class _ImportSheetState extends State<_ImportSheet> {
   String? _fileError;
   List<_ImportRow> _rows = [];
 
-  List<_ImportRow> get _valid => _rows.where((r) => r.ok).toList();
-  List<_ImportRow> get _bad => _rows.where((r) => !r.ok).toList();
+  _RowStatus? _view; // null = show all rows
+
+  int _count(_RowStatus s) => _rows.where((r) => r.status == s).length;
 
   Future<void> _pick() async {
     try {
@@ -2817,7 +2834,6 @@ class _ImportSheetState extends State<_ImportSheet> {
       return;
     }
 
-    // Map header names (case-insensitive) to column positions.
     final head = <String, int>{};
     for (var i = 0; i < table.first.length; i++) {
       var h = table.first[i].trim().toLowerCase().replaceAll(' ', '');
@@ -2843,11 +2859,19 @@ class _ImportSheetState extends State<_ImportSheet> {
       return (i == null || i >= r.length) ? '' : r[i].trim();
     }
 
-    // Existing books + earlier rows count as duplicates (title + author).
     String keyOf(String t, String a) => '${t.toLowerCase()}|${a.toLowerCase()}';
-    final seen = <String>{
-      for (final b in LibraryService.instance.books) keyOf(b.title, b.author),
-    };
+    String day(DateTime? d) =>
+        d == null ? '' : d.toIso8601String().substring(0, 10);
+
+    final lib = LibraryService.instance;
+    final byIsbn = <String, Book>{};
+    final byTitle = <String, Book>{};
+    for (final b in lib.books) {
+      final i = _cleanIsbn(b.isbn);
+      if (i.isNotEmpty) byIsbn[i] = b;
+      byTitle[keyOf(b.title, b.author)] = b;
+    }
+    final fileSeen = <String, int>{}; // key -> row number
 
     final out = <_ImportRow>[];
     final body = table.skip(1).take(_maxRows).toList();
@@ -2895,35 +2919,128 @@ class _ImportSheetState extends State<_ImportSheet> {
       final image = cellOf(r, 'image');
       check(Validators.imageUrl(image));
 
-      if (row.errors.isEmpty) {
-        final k = keyOf(title, author);
-        if (seen.contains(k)) {
-          row.errors.add('Duplicate: this title and author already exist.');
-        } else {
-          seen.add(k);
-          final n = int.parse(copies);
-          row.book = Book(
-            title: title,
-            author: author,
-            publisher: publisher,
-            category: category,
-            color: Palette.burgundy,
-            description: desc,
-            published: published,
-            totalCopies: n,
-            copiesAvailable: n,
-            imageUrl: image,
-            isbn: isbn,
-            pages: int.parse(pagesRaw),
-            shelf: shelf,
-          );
-        }
+      final sub = cellOf(r, 'subcategory');
+      if (sub.length > 40) {
+        row.errors.add('Subcategory must be 40 characters or fewer.');
+      } else if (sub.isNotEmpty &&
+          !RegExp(r"^[\p{L}\p{N}\s&'-]+$", unicode: true).hasMatch(sub)) {
+        row.errors.add("Subcategory: use letters, numbers, spaces, & ' - only.");
+      }
+
+      // 1) Invalid
+      if (row.errors.isNotEmpty) {
+        row.status = _RowStatus.invalid;
+        out.add(row);
+        continue;
+      }
+
+      // 2) Repeated inside this file
+      final tKey = keyOf(title, author);
+      final prior = fileSeen[isbn] ?? fileSeen[tKey];
+      if (prior != null) {
+        row.status = _RowStatus.duplicate;
+        row.note = 'Same book as row $prior in this file.';
+        out.add(row);
+        continue;
+      }
+
+      // 3) Match against the catalog (ISBN first, then title + author)
+      final byI = byIsbn[isbn];
+      final byT = byTitle[tKey];
+      if (byI != null && byT != null && byI.id != byT.id) {
+        row.errors.add(
+            'The ISBN matches one catalog book but the title and author match another.');
+        row.status = _RowStatus.invalid;
+        out.add(row);
+        continue;
+      }
+      final match = byI ?? byT;
+      fileSeen[isbn] = row.line;
+      fileSeen[tKey] = row.line;
+
+      if (match == null) {
+        final n = int.parse(copies);
+        row.book = Book(
+          title: title,
+          author: author,
+          publisher: publisher,
+          category: category,
+          subcategory: sub,
+          color: Palette.burgundy,
+          description: desc,
+          published: published,
+          totalCopies: n,
+          copiesAvailable: n,
+          imageUrl: image,
+          isbn: isbn,
+          pages: int.parse(pagesRaw),
+          shelf: shelf,
+        );
+        row.status = _RowStatus.newBook;
+        out.add(row);
+        continue;
+      }
+
+      // 4) Existing book: update or identical (blank optional cells keep current values)
+      final n = copiesRaw.isEmpty ? match.totalCopies : int.parse(copies);
+      final borrowed = lib.activeFor(match);
+      if (n < borrowed) {
+        row.errors.add(
+            '$borrowed copies are currently borrowed. Total copies can\'t be lower than that.');
+        row.status = _RowStatus.invalid;
+        out.add(row);
+        continue;
+      }
+      final pages = int.parse(pagesRaw);
+      final newSub = sub.isEmpty ? match.subcategory : sub;
+      final newDesc = desc.isEmpty ? match.description : desc;
+      final newShelf = shelf.isEmpty ? match.shelf : shelf;
+      final imageChanged = image.isNotEmpty &&
+          (image != match.imageUrl || match.imageBytes != null);
+
+      row.changes.addAll([
+        if (match.title != title) 'Title',
+        if (match.author != author) 'Author',
+        if (_cleanIsbn(match.isbn) != isbn) 'ISBN',
+        if (match.publisher != publisher) 'Publisher',
+        if (match.category != category) 'Category',
+        if (match.subcategory != newSub) 'Subcategory',
+        if (day(match.published) != day(published)) 'Published date',
+        if (match.pages != pages) 'Pages',
+        if (match.totalCopies != n) 'Copies',
+        if (match.description != newDesc) 'Description',
+        if (imageChanged) 'Image',
+        if (match.shelf != newShelf) 'Shelf',
+      ]);
+
+      row.book = match.copyWith(
+        title: title,
+        author: author,
+        publisher: publisher,
+        category: category,
+        subcategory: newSub,
+        published: published,
+        pages: pages,
+        isbn: isbn,
+        shelf: newShelf,
+        description: newDesc,
+        totalCopies: n,
+        copiesAvailable: n,
+        imageUrl: imageChanged ? image : null,
+        clearImageBytes: imageChanged,
+      );
+      if (row.changes.isEmpty) {
+        row.status = _RowStatus.duplicate;
+        row.note = 'Already in the catalog with the same details.';
+      } else {
+        row.status = _RowStatus.update;
       }
       out.add(row);
     }
 
     setState(() {
       _fileName = name;
+      _view = null;
       _fileError = table.length - 1 > _maxRows
           ? 'Only the first $_maxRows rows were read.'
           : null;
@@ -2931,29 +3048,177 @@ class _ImportSheetState extends State<_ImportSheet> {
     });
   }
 
+  Widget _rowTile(_ImportRow r) {
+    final (label, color, _) = _statusMeta(r.status);
+    final detail = switch (r.status) {
+      _RowStatus.invalid => r.errors.join(' '),
+      _RowStatus.update => 'Will change: ${r.changes.join(', ')}.',
+      _RowStatus.duplicate => r.note,
+      _RowStatus.newBook => 'Will be added to the catalog.',
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                    color: color, borderRadius: BorderRadius.circular(99)),
+                child: Text(label,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Row ${r.line} · ${r.label}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(detail,
+              style:
+                  const TextStyle(fontSize: 12, color: Palette.textDark)),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _resultsView() {
+    final shown =
+        (_view == null ? _rows : _rows.where((r) => r.status == _view))
+            .toList();
+    final add = _count(_RowStatus.newBook);
+    final upd = _count(_RowStatus.update);
+    final inv = _count(_RowStatus.invalid);
+    final total = add + upd;
+
+    return [
+      GridView.count(
+        crossAxisCount: 2,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 1.9,
+        children: [
+          for (final s in _RowStatus.values)
+            GestureDetector(
+              onTap: () => setState(() => _view = _view == s ? null : s),
+              child: Opacity(
+                opacity: _view == null || _view == s ? 1 : 0.45,
+                child: _ResultTile(
+                  label: _statusMeta(s).$1,
+                  value: _count(s),
+                  color: _statusMeta(s).$2,
+                  icon: _statusMeta(s).$3,
+                ),
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: 6),
+      const Text('Tap a box to filter the list below.',
+          style: TextStyle(fontSize: 12, color: Palette.textMuted)),
+      const SizedBox(height: 10),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Palette.burgundy.withAlpha(60)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final r in shown.take(50)) _rowTile(r),
+            if (shown.length > 50)
+              Text('...and ${shown.length - 50} more.',
+                  style: const TextStyle(
+                      fontSize: 12, color: Palette.textMuted)),
+          ],
+        ),
+      ),
+      if (inv > 0) ...[
+        const SizedBox(height: 8),
+        const Text('Fix the invalid rows and upload again to include them.',
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFC0121F))),
+      ],
+      const SizedBox(height: 16),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: total == 0 ? null : _import,
+          icon: const Icon(Icons.auto_stories),
+          label: Text(total == 0
+              ? 'Nothing to import'
+              : 'Import ($add new, $upd updates)'),
+          style: FilledButton.styleFrom(
+            backgroundColor: Palette.burgundy,
+            foregroundColor: Palette.creamLight,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(
+                  color: total == 0 ? Colors.transparent : Palette.amber,
+                  width: 1.5),
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
   Future<void> _import() async {
-    final count = _valid.length;
+    final fresh =
+        _rows.where((r) => r.status == _RowStatus.newBook).toList();
+    final upd = _rows.where((r) => r.status == _RowStatus.update).toList();
+    final dups = _count(_RowStatus.duplicate);
+    final inv = _count(_RowStatus.invalid);
+
     final ok = await _confirmDialog(
         context,
         'Import Books',
-        'Import $count ${count == 1 ? 'book' : 'books'} into the catalog?',
+        'Add ${fresh.length} new and update ${upd.length} existing '
+            '${upd.length == 1 ? 'book' : 'books'}? ${dups + inv} rows will be skipped.',
         'Yes, import');
     if (!ok || !mounted) return;
-    final books = _valid.map((r) => r.book!).toList();
-    final n = await LibraryService.instance.addAll(books);
+
+    final lib = LibraryService.instance;
+    final added = await lib.addAll([for (final r in fresh) r.book!]);
+    var updated = 0;
+    var failed = fresh.length - added;
+    for (final r in upd) {
+      try {
+        await lib.update(r.book!);
+        updated++;
+      } catch (_) {
+        failed++;
+      }
+    }
     if (!mounted) return;
-    final skipped = _bad.length + (books.length - n);
     Navigator.pop(
       context,
-      'Imported $n ${n == 1 ? 'book' : 'books'}'
-      '${skipped > 0 ? ' ($skipped skipped)' : ''}.',
+      'Imported: $added added, $updated updated, $dups duplicates skipped, '
+      '$inv invalid skipped${failed > 0 ? ', $failed failed' : ''}.',
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final valid = _valid.length;
-    final bad = _bad;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -3102,8 +3367,9 @@ class _ImportSheetState extends State<_ImportSheet> {
                         'In Excel: File > Save As > "CSV (Comma delimited)".',
                         'If a value contains a comma, wrap it in "quotes".',
                         'Delete the two sample rows before importing real data.',
-                        'Up to 500 rows per file. Books already in the '
-                            'catalog (same title and author) are skipped.',
+                                'Up to 500 rows per file. A row matching a catalog book (same ISBN, '
+            'or same title and author) updates it. Identical rows are skipped '
+            'as duplicates.',
                       ]),
                     ],
                   ),
@@ -3181,95 +3447,7 @@ class _ImportSheetState extends State<_ImportSheet> {
                 ),
 
                 // Results
-                if (_rows.isNotEmpty) ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _ResultTile(
-                            label: 'Ready to import',
-                            value: valid,
-                            color: const Color(0xFF0C7A43),
-                            icon: Icons.check_circle_outline),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _ResultTile(
-                            label: 'Will be skipped',
-                            value: bad.length,
-                            color: const Color(0xFFC0121F),
-                            icon: Icons.warning_amber_rounded),
-                      ),
-                    ],
-                  ),
-                  if (bad.isNotEmpty) ...[
-                    const SizedBox(height: 14),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFC0121F).withAlpha(18),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: const Color(0xFFC0121F).withAlpha(90)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Fix these rows and upload again:',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFFC0121F))),
-                          const SizedBox(height: 8),
-                          for (final r in bad.take(20))
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Row ${r.line} · ${r.label}',
-                                      style: const TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w700)),
-                                  Text(r.errors.join(' '),
-                                      style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Palette.textDark)),
-                                ],
-                              ),
-                            ),
-                          if (bad.length > 20)
-                            Text('...and ${bad.length - 20} more.',
-                                style: const TextStyle(
-                                    fontSize: 12, color: Palette.textMuted)),
-                        ],
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: valid == 0 ? null : _import,
-                      icon: const Icon(Icons.auto_stories),
-                      label: Text(valid == 0
-                          ? 'Nothing to import'
-                          : 'Import $valid ${valid == 1 ? 'book' : 'books'}'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Palette.burgundy,
-                        foregroundColor: Palette.creamLight,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          side: BorderSide(
-                              color: valid == 0
-                                  ? Colors.transparent
-                                  : Palette.amber,
-                              width: 1.5),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                if (_rows.isNotEmpty) ..._resultsView(),
               ],
             ),
           ),
@@ -3285,15 +3463,16 @@ class _ImportSheetState extends State<_ImportSheet> {
 const _guide = <(String, bool, String, String)>[
   ('title', true, '2 to 100 characters', 'The Hobbit'),
   ('author', true, 'Letters only, up to 60', 'J.R.R. Tolkien'),
-  ('isbn', true, '10 or 13 digits', '9780547928227'),
+  ('isbn', true, '10 or 13 digits (used to match existing books)', '9780547928227'),
   ('publisher', true, 'Up to 60 characters', 'Allen & Unwin'),
-  ('category', true, 'Pick from the list below', 'Fantasy'),
+  ('category', true, 'Pick from the list below', 'Fiction'),
   ('published', true, 'YYYY-MM-DD, not in the future', '1937-09-21'),
   ('pages', true, 'Whole number 1 to 10000', '310'),
-  ('description', false, '10 to 300 characters (can be blank)', 'A hobbit goes on an adventure.'),
-  ('copies', false, 'Whole number 1 to 99 (blank = 1)', '3'),
-  ('image', false, 'Link starting with https://', 'https://site.com/cover.jpg'),
-  ('shelf', false, 'Up to 40 characters', 'Aisle 3, Shelf B'),
+  ('description', false, '10 to 300 characters (blank keeps current)', 'A hobbit goes on an adventure.'),
+  ('copies', false, 'Whole number 1 to 99 (blank = 1, or current)', '3'),
+  ('image', false, 'Link starting with https:// (blank keeps current)', 'https://site.com/cover.jpg'),
+  ('subcategory', false, 'Up to 40 characters (blank keeps current)', 'Fantasy'),
+  ('shelf', false, 'Up to 40 characters (blank keeps current)', 'Aisle 3, Shelf B'),
 ];
 
 class _StepCard extends StatelessWidget {
@@ -3419,18 +3598,19 @@ class _SamplePreview extends StatelessWidget {
   const _SamplePreview();
 
   static const _head = [
-    'title', 'author', 'publisher', 'category',
-    'published', 'description', 'copies', 'image',
+    'title', 'author', 'isbn', 'publisher', 'category', 'published',
+    'copies', 'pages', 'description', 'image', 'subcategory', 'shelf',
   ];
   static const _rows = [
     [
-      'The Hobbit', 'J.R.R. Tolkien', 'Allen & Unwin', 'Fantasy',
-      '1937-09-21', 'A hobbit goes on...', '3', '',
+      'The Hobbit', 'J.R.R. Tolkien', '9780547928227', 'Allen & Unwin',
+      'Fiction', '1937-09-21', '3', '310', 'A hobbit goes on...', '',
+      'Fantasy', 'Aisle 1',
     ],
     [
-      'A Brief History of Time', 'Stephen Hawking', 'Bantam Books',
-      'Science', '1988-04-01', 'An intro to cosmology...', '2',
-      'https://...',
+      'A Brief History of Time', 'Stephen Hawking', '9780553380163',
+      'Bantam Books', 'Non-Fiction', '1988-04-01', '2', '212',
+      'An intro to cosmology...', 'https://...', 'Cosmology', 'Aisle 4',
     ],
   ];
 
