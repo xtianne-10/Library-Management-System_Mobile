@@ -43,6 +43,7 @@ class BorrowRequest {
     required this.email,
     required this.requestedOn,
     this.decidedOn,
+    this.declineReason = '',
   });
 
   final int id;
@@ -51,6 +52,7 @@ class BorrowRequest {
   final String email;
   final DateTime requestedOn;
   final DateTime? decidedOn;
+  final String declineReason;
   RequestStatus status = RequestStatus.pending;
 }
 
@@ -150,6 +152,7 @@ class BorrowStore extends ChangeNotifier {
               email: r.borrowerEmail,
               requestedOn: r.requestedOn,
               decidedOn: r.decidedOn,
+              declineReason: r.declineReason,
             )..status = RequestStatus.declined)
         .toList();
     list.sort((a, b) =>

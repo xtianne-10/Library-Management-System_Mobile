@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:library_management_system_mobile/config/api_config.dart';
 
 import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/services/auth_service.dart';
@@ -92,6 +96,7 @@ class LoanRequest {
     required this.requestedOn,
     required this.declined,
     this.decidedOn,
+    this.declineReason = '',
   });
 
   final int id;
@@ -102,6 +107,7 @@ class LoanRequest {
   final DateTime requestedOn;
   final bool declined;
   final DateTime? decidedOn;
+  final String declineReason;
 }
 
 /// Shared in-memory catalog + transactions (single source of truth).
@@ -202,6 +208,7 @@ class LibraryService extends ChangeNotifier {
                     DateTime.now(),
             declined: state == 'declined',
             decidedOn: DateTime.tryParse((r['decidedOn'] ?? '').toString()),
+            declineReason: (r['declineReason'] ?? '').toString(),
           ));
           continue;
         }
@@ -387,7 +394,24 @@ class LibraryService extends ChangeNotifier {
   }
 
   Future<String?> approveRequest(int id) => _answer(id, BorrowApi.approve);
-  Future<String?> declineRequest(int id) => _answer(id, BorrowApi.decline);
+  Future<String?> declineRequest(int id, String reason) =>
+      _answer(id, (remoteId) async {
+        final res = await http.put(
+          Uri.parse('${ApiConfig.baseUrl}/borrowings/$remoteId/decline'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ${AuthService.instance.token}',
+          },
+          body: jsonEncode({'reason': reason}),
+        );
+        if (res.statusCode != 200) {
+          var msg = 'Could not decline the request.';
+          try {
+            msg = (jsonDecode(res.body) as Map)['error']?.toString() ?? msg;
+          } catch (_) {}
+          throw Exception(msg);
+        }
+      });
   Future<String?> cancelRequest(int id) => _answer(id, BorrowApi.cancel);
 
   Future<String?> returnBook(int id) async {

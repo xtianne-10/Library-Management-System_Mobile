@@ -14,6 +14,36 @@ import 'package:library_management_system_mobile/utils/validators.dart';
 
 const _categories = ['Fiction', 'Non-Fiction', 'Academic', 'Restricted'];
 
+String _cleanIsbn(String s) => s.replaceAll(RegExp(r'[\s-]'), '').toUpperCase();
+
+String? _validateIsbn(String? v) {
+  final s = _cleanIsbn(v ?? '');
+  if (s.isEmpty) return 'ISBN is required.';
+  if (!RegExp(r'^(\d{9}[\dX]|\d{13})$').hasMatch(s)) {
+    return 'Enter a valid ISBN (10 or 13 digits).';
+  }
+  return null;
+}
+
+String? _validatePages(String? v) {
+  final s = (v ?? '').trim();
+  if (s.isEmpty) return 'Number of pages is required.';
+  final n = int.tryParse(s);
+  if (n == null || n < 1 || n > 10000) {
+    return 'Enter a whole number from 1 to 10000.';
+  }
+  return null;
+}
+
+// Description is optional now
+String? _validateDescription(String? v) {
+  final s = (v ?? '').trim();
+  if (s.isEmpty) return null;
+  if (s.length < 10) return 'Write at least 10 characters, or leave it empty.';
+  if (s.length > 300) return 'Keep it under 300 characters.';
+  return null;
+}
+
 const _months = [
   'January', 'February', 'March', 'April', 'May', 'June', 'July',
   'August', 'September', 'October', 'November', 'December',
@@ -35,12 +65,12 @@ const _cardShape = RoundedRectangleBorder(
 );
 
 const _statIcons = {
-  'Total Books': Icons.menu_book,
-  'Borrowed': Icons.bookmark,
-  'Overdue': Icons.warning_amber_rounded,
-  'Available': Icons.check_circle_outline,
-  'Students': Icons.school,
-  'Fines Due': Icons.payments_outlined,
+  'Total Book Copies': Icons.menu_book,
+  'Available Copies': Icons.check_circle_outline,
+  'Currently Borrowed': Icons.bookmark,
+  'Overdue Books': Icons.warning_amber_rounded,
+  'Pending Requests': Icons.how_to_reg,
+  'Due Today': Icons.event_available,
 };
 
 OutlineInputBorder _border(Color c, [double w = 1]) => OutlineInputBorder(
@@ -374,14 +404,26 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   }
 
   List<Widget> _overview(List<(String, String, Color)> stats) {
-    final recent = _lib.transactions.take(5).toList();
-    final now = DateTime.now();
-    bool isToday(DateTime? d) =>
-        d != null && d.year == now.year && d.month == now.month && d.day == now.day;
-    final borrowedToday =
-        _lib.transactions.where((t) => isToday(t.borrowedOn)).length;
-    final returnedToday =
-        _lib.transactions.where((t) => t.returned && isToday(t.returnedOn)).length;
+    final pending = _lib.pendingRequests;
+    final shownPending = pending.take(4).toList();
+    final overdue = _lib.transactions.where((t) => t.overdue).toList()
+      ..sort((a, b) => b.daysOverdue.compareTo(a.daysOverdue));
+    final shownOverdue = overdue.take(4).toList();
+
+    Widget listCard(List<Widget> rows) => Card(
+          elevation: 0,
+          color: Palette.card,
+          shape: _cardShape,
+          margin: EdgeInsets.zero,
+          child: Column(
+            children: [
+              for (var i = 0; i < rows.length; i++) ...[
+                if (i > 0) const Divider(height: 1, color: Color(0x2655161D)),
+                rows[i],
+              ],
+            ],
+          ),
+        );
 
     return [
       Text(_today(),
@@ -390,47 +432,43 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       const SizedBox(height: 14),
 
       // Quick actions
+      const _Section('Quick Actions', Icons.bolt),
+      const SizedBox(height: 12),
       Row(
         children: [
           Expanded(
               child: _QuickAction(
                   icon: Icons.assignment_ind_outlined,
-                  label: 'Issue',
+                  label: 'Borrowing',
                   onTap: () => _openIssue())),
           const SizedBox(width: 10),
           Expanded(
               child: _QuickAction(
-                  icon: Icons.add_circle_outline,
-                  label: 'Add Book',
-                  onTap: () => _openForm())),
+                  icon: Icons.assignment_return_outlined,
+                  label: 'Returns',
+                  onTap: () => _goTransactions('Not Returned'))),
           const SizedBox(width: 10),
           Expanded(
               child: _QuickAction(
-                  icon: Icons.upload_file,
-                  label: 'Import',
-                  onTap: _openImport)),
+                  icon: Icons.menu_book_outlined,
+                  label: 'Catalog',
+                  onTap: () => setState(() {
+                        _tab = 1;
+                        _sortKey = 'title';
+                        _asc = true;
+                        _catalogPage = 0;
+                      }))),
           const SizedBox(width: 10),
           Expanded(
               child: _QuickAction(
-                  icon: Icons.how_to_reg,
-                  label: 'Requests',
-                  badge: _lib.pendingRequests.length,
-                  onTap: _openRequests)),
+                  icon: Icons.history,
+                  label: 'History',
+                  onTap: () => _goTransactions('All Statuses'))),
         ],
       ),
-      const SizedBox(height: 24),
+      const SizedBox(height: 28),
 
-      // Borrow requests waiting for approval
-      if (_lib.pendingRequests.isNotEmpty) ...[
-        _Section('Borrow Requests (${_lib.pendingRequests.length})',
-            Icons.how_to_reg),
-        const SizedBox(height: 12),
-        _RequestsBanner(
-            count: _lib.pendingRequests.length, onTap: _openRequests),
-        const SizedBox(height: 16),
-      ],
-
-      // Stats
+      // Six KPI cards
       const _Section('Library at a Glance', Icons.auto_stories),
       const SizedBox(height: 14),
       GridView.count(
@@ -456,83 +494,122 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       ),
       const SizedBox(height: 28),
 
-      const _Section("Today's Summary", Icons.today),
+      // Borrowing vs returns
+      const _Section('Borrowing Activity', Icons.bar_chart),
       const SizedBox(height: 12),
-      Row(
-        children: [
-          Expanded(
-            child: _ResultTile(
-                label: 'Borrowed today',
-                value: borrowedToday,
-                color: Palette.burgundy,
-                icon: Icons.north_east),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _ResultTile(
-                label: 'Returned today',
-                value: returnedToday,
-                color: const Color(0xFF0C7A43),
-                icon: Icons.assignment_return_outlined),
-          ),
-        ],
-      ),
+      _BorrowChart(transactions: _lib.transactions),
       const SizedBox(height: 28),
 
-      // Recent activity
-      const _Section('Recent Activity', Icons.history),
+      // Pending requests
+      _Section('Pending Requests (${pending.length})', Icons.how_to_reg),
       const SizedBox(height: 12),
-      if (recent.isEmpty)
+      if (pending.isEmpty)
         const _EmptyNote(
-            icon: Icons.menu_book_outlined, text: 'No loans recorded yet.')
-      else
-        Card(
-          elevation: 0,
-          color: Palette.card,
-          shape: _cardShape,
-          margin: EdgeInsets.zero,
-          child: Column(
-            children: [
-              for (var i = 0; i < recent.length; i++) ...[
-                if (i > 0)
-                  const Divider(height: 1, color: Color(0x2655161D)),
-                _ActivityRow(tx: recent[i]),
-              ],
-            ],
+            icon: Icons.verified_outlined,
+            text: 'No requests waiting for approval.')
+      else ...[
+        listCard([
+          for (final r in shownPending)
+            ListTile(
+              dense: true,
+              leading: CircleAvatar(
+                radius: 18,
+                backgroundColor: Palette.amber.withAlpha(30),
+                child: const Icon(Icons.how_to_reg,
+                    size: 18, color: Palette.amber),
+              ),
+              title: Text(r.book.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text('${r.borrower} · ${_fmt(r.requestedOn)}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: TextButton(
+                onPressed: _openRequests,
+                style: TextButton.styleFrom(foregroundColor: Palette.burgundy),
+                child: const Text('Review'),
+              ),
+            ),
+        ]),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: _openRequests,
+            style: TextButton.styleFrom(foregroundColor: Palette.burgundy),
+            child: Text('View all (${pending.length})'),
           ),
         ),
+      ],
+      const SizedBox(height: 20),
+
+      // Overdue books
+      const _Section('Overdue Books', Icons.warning_amber_rounded),
+      const SizedBox(height: 12),
+      if (overdue.isEmpty)
+        const _EmptyNote(
+            icon: Icons.verified_outlined, text: 'Nothing is overdue.')
+      else ...[
+        listCard([
+          for (final t in shownOverdue)
+            ListTile(
+              dense: true,
+              leading: CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0xFFC0121F).withAlpha(30),
+                child: const Icon(Icons.warning_amber_rounded,
+                    size: 18, color: Color(0xFFC0121F)),
+              ),
+              title: Text(t.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(
+                  '${t.borrower} · ${t.daysOverdue} ${t.daysOverdue == 1 ? 'day' : 'days'} late',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+              trailing: Text('₱${t.fine.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                      color: Color(0xFFC0121F), fontWeight: FontWeight.w700)),
+            ),
+        ]),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: () => _goTransactions('Overdue'),
+            style: TextButton.styleFrom(foregroundColor: Palette.burgundy),
+            child: Text('View all (${overdue.length})'),
+          ),
+        ),
+      ],
     ];
   }
 
-  void _goStat(String label) => setState(() {
-        switch (label) {
-          case 'Total Books':
-            _tab = 1;
-          case 'Available':
-            _tab = 1;
-            _sortKey = 'status';
-            _asc = true;
-            _catalogPage = 0;
-          case 'Students':
-            _tab = 2;
-            _borrowerView = 0;
-          case 'Borrowed':
-            _tab = 2;
-            _borrowerView = 1;
-            _txFilter = 'Not Returned';
-            _txPage = 0;
-          case 'Overdue':
-            _tab = 2;
-            _borrowerView = 1;
-            _txFilter = 'Overdue';
-            _txPage = 0;
-          default: // Fines Due
-            _tab = 2;
-            _borrowerView = 1;
-            _txFilter = 'All Statuses';
-            _txPage = 0;
-        }
+  void _goTransactions(String filter) => setState(() {
+        _tab = 2;
+        _borrowerView = 1;
+        _txFilter = filter;
+        _txPage = 0;
       });
+
+  void _goStat(String label) {
+    switch (label) {
+      case 'Total Book Copies':
+        setState(() => _tab = 1);
+      case 'Available Copies':
+        setState(() {
+          _tab = 1;
+          _sortKey = 'status';
+          _asc = true;
+          _catalogPage = 0;
+        });
+      case 'Pending Requests':
+        _openRequests();
+      case 'Overdue Books':
+        _goTransactions('Overdue');
+      default: // Currently Borrowed, Due Today
+        _goTransactions('Not Returned');
+    }
+  }
 
   List<(IconData, String, String, Color)> _notifications() {
     const red = Color(0xFFC0121F);
@@ -1091,6 +1168,16 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               ),
             ),
             IconButton(
+              tooltip: 'Borrow requests',
+              onPressed: _openRequests,
+              icon: Badge(
+                isLabelVisible: _lib.pendingRequests.isNotEmpty,
+                label: Text('${_lib.pendingRequests.length}'),
+                child: const Icon(Icons.how_to_reg,
+                    color: Palette.creamLight, size: 28),
+              ),
+            ),
+            IconButton(
               tooltip: 'Notifications',
               onPressed: () {
                 setState(
@@ -1167,17 +1254,30 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
             s.email.toLowerCase().contains(sq) ||
             s.phone.contains(sq))
         .toList();
+    final now = DateTime.now();
+    final dueToday = _lib.transactions
+        .where((t) =>
+            !t.returned &&
+            t.due.year == now.year &&
+            t.due.month == now.month &&
+            t.due.day == now.day)
+        .length;
     final stats = [
-      ('Total Books', '${all.length}', const Color(0xFFE4F1EE)),
-      ('Borrowed', '${_lib.transactions.where((t) => !t.returned).length}',
-          const Color(0xFFDEDAF4)),
-      ('Overdue', '${_lib.transactions.where((t) => t.overdue).length}',
-          const Color(0xFFFFADAD)),
-      ('Available', '${all.fold<int>(0, (s, b) => s + _lib.copiesLeft(b))}',
+      ('Total Book Copies',
+          '${all.fold<int>(0, (s, b) => s + b.totalCopies)}',
+          const Color(0xFFE4F1EE)),
+      ('Available Copies',
+          '${all.fold<int>(0, (s, b) => s + _lib.copiesLeft(b))}',
           const Color(0xFFFFD6A5)),
-      ('Students', '${allStudents.length}', const Color(0xFFD7ECFF)),
-      ('Fines Due', '₱${_lib.outstandingFines.toStringAsFixed(0)}',
-          const Color(0xFFF6D6E8)),
+      ('Currently Borrowed',
+          '${_lib.transactions.where((t) => !t.returned).length}',
+          const Color(0xFFDEDAF4)),
+      ('Overdue Books',
+          '${_lib.transactions.where((t) => t.overdue).length}',
+          const Color(0xFFFFADAD)),
+      ('Pending Requests', '${_lib.pendingRequests.length}',
+          const Color(0xFFFFF1C2)),
+      ('Due Today', '$dueToday', const Color(0xFFD7ECFF)),
     ];
     final text = Theme.of(context).textTheme;
 
@@ -2190,6 +2290,10 @@ class _BookFormState extends State<_BookForm> {
   late final _image = TextEditingController(text: widget.book?.imageUrl);
   late final _copies =
       TextEditingController(text: '${widget.book?.totalCopies ?? 1}');
+  late final _isbn = TextEditingController(text: widget.book?.isbn);
+  late final _pages = TextEditingController(
+      text: widget.book?.pages == null ? '' : '${widget.book!.pages}');
+  late final _shelf = TextEditingController(text: widget.book?.shelf);
   late final _dateCtl = TextEditingController(
       text: widget.book?.published == null ? '' : _fmt(widget.book!.published));
 
@@ -2212,7 +2316,10 @@ class _BookFormState extends State<_BookForm> {
 
   @override
   void dispose() {
-    for (final c in [_title, _author, _publisher, _desc, _image, _dateCtl, _copies]) {
+    for (final c in [
+      _title, _author, _publisher, _desc, _image, _dateCtl, _copies,
+      _isbn, _pages, _shelf,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -2271,6 +2378,9 @@ class _BookFormState extends State<_BookForm> {
         published: _published,
         totalCopies: total,
         copiesAvailable: total,
+        isbn: _cleanIsbn(_isbn.text),
+        pages: int.parse(_pages.text.trim()),
+        shelf: _shelf.text.trim(),
         description: _desc.text.trim(),
         imageUrl: _bytes != null ? '' : _image.text.trim(),
         imageBytes: _bytes,
@@ -2330,6 +2440,22 @@ class _BookFormState extends State<_BookForm> {
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 14),
+              TextFormField(
+                controller: _isbn,
+                decoration: _dec('ISBN', hint: 'e.g. 978-0-547-92822-7'),
+                validator: _validateIsbn,
+                autovalidateMode: auto,
+                textInputAction: TextInputAction.next,
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _pages,
+                keyboardType: TextInputType.number,
+                decoration: _dec('Number of Pages', hint: 'e.g. 310'),
+                validator: _validatePages,
+                autovalidateMode: auto,
+              ),
+              const SizedBox(height: 14),
               const SizedBox(height: 10),
               const _Section('Publication', Icons.event),
               const SizedBox(height: 14),
@@ -2358,9 +2484,16 @@ class _BookFormState extends State<_BookForm> {
               TextFormField(
                 controller: _copies,
                 keyboardType: TextInputType.number,
-                decoration: _dec('Number of Copies', hint: 'e.g. 3'),
+                decoration: _dec('Total Copies', hint: 'e.g. 3'),
                 validator: Validators.copies,
                 autovalidateMode: auto,
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _shelf,
+                maxLength: 40,
+                decoration: _dec('Shelf / Location (optional)',
+                    hint: 'e.g. Aisle 3, Shelf B'),
               ),
               const SizedBox(height: 14),
               const SizedBox(height: 10),
@@ -2370,9 +2503,9 @@ class _BookFormState extends State<_BookForm> {
                 controller: _desc,
                 maxLines: 4,
                 maxLength: 300,
-                decoration: _dec('Description',
+                decoration: _dec('Description (optional)',
                     hint: 'Enter a short description...'),
-                validator: Validators.description,
+                validator: _validateDescription,
                 autovalidateMode: auto,
               ),
               const SizedBox(height: 10),
@@ -2445,9 +2578,9 @@ class _BookFormState extends State<_BookForm> {
 }
 // ---------- Bulk import ----------
 
-const _csvTemplate = '''title,author,publisher,category,published,copies,description,image
-The Hobbit,J.R.R. Tolkien,Allen & Unwin,Fantasy,1937-09-21,3,A hobbit goes on an unexpected adventure.,
-A Brief History of Time,Stephen Hawking,Bantam Books,Science,1988-04-01,2,An introduction to cosmology for general readers.,https://example.com/cover.jpg
+const _csvTemplate = '''title,author,isbn,publisher,category,published,copies,pages,description,image,shelf
+The Hobbit,J.R.R. Tolkien,9780547928227,Allen & Unwin,Fiction,1937-09-21,3,310,A hobbit goes on an unexpected adventure.,,Aisle 1
+A Brief History of Time,Stephen Hawking,9780553380163,Bantam Books,Non-Fiction,1988-04-01,2,212,An introduction to cosmology for general readers.,https://example.com/cover.jpg,Aisle 4
 ''';
 
 /// Minimal CSV parser: handles quotes, commas and line breaks inside quotes.
@@ -2512,7 +2645,7 @@ class _ImportSheet extends StatefulWidget {
 class _ImportSheetState extends State<_ImportSheet> {
   static const _maxRows = 500;
   static const _required = [
-    'title', 'author', 'publisher', 'category', 'published', 'description',
+    'title', 'author', 'isbn', 'publisher', 'category', 'published', 'pages',
   ];
 
   String? _fileName;
@@ -2576,6 +2709,8 @@ class _ImportSheetState extends State<_ImportSheet> {
       if (h == 'totalcopies' || h == 'numberofcopies') h = 'copies';
       if (h == 'imageurl' || h == 'imagelink') h = 'image';
       if (h == 'datepublished') h = 'published';
+      if (h == 'numberofpages') h = 'pages';
+      if (h == 'shelf/location' || h == 'location') h = 'shelf';
       head[h] = i;
     }
     final missing = _required.where((k) => !head.containsKey(k)).toList();
@@ -2636,7 +2771,12 @@ class _ImportSheetState extends State<_ImportSheet> {
       check(Validators.copies(copies));
 
       final desc = cellOf(r, 'description');
-      check(Validators.description(desc));
+      check(_validateDescription(desc));
+      final isbn = _cleanIsbn(cellOf(r, 'isbn'));
+      check(_validateIsbn(isbn));
+      final pagesRaw = cellOf(r, 'pages');
+      check(_validatePages(pagesRaw));
+      final shelf = cellOf(r, 'shelf');
       final image = cellOf(r, 'image');
       check(Validators.imageUrl(image));
 
@@ -2658,6 +2798,9 @@ class _ImportSheetState extends State<_ImportSheet> {
             totalCopies: n,
             copiesAvailable: n,
             imageUrl: image,
+            isbn: isbn,
+            pages: int.parse(pagesRaw),
+            shelf: shelf,
           );
         }
       }
@@ -3020,12 +3163,15 @@ class _ImportSheetState extends State<_ImportSheet> {
 const _guide = <(String, bool, String, String)>[
   ('title', true, '2 to 100 characters', 'The Hobbit'),
   ('author', true, 'Letters only, up to 60', 'J.R.R. Tolkien'),
+  ('isbn', true, '10 or 13 digits', '9780547928227'),
   ('publisher', true, 'Up to 60 characters', 'Allen & Unwin'),
   ('category', true, 'Pick from the list below', 'Fantasy'),
   ('published', true, 'YYYY-MM-DD, not in the future', '1937-09-21'),
-  ('description', true, '10 to 300 characters', 'A hobbit goes on an adventure.'),
+  ('pages', true, 'Whole number 1 to 10000', '310'),
+  ('description', false, '10 to 300 characters (can be blank)', 'A hobbit goes on an adventure.'),
   ('copies', false, 'Whole number 1 to 99 (blank = 1)', '3'),
   ('image', false, 'Link starting with https://', 'https://site.com/cover.jpg'),
+  ('shelf', false, 'Up to 40 characters', 'Aisle 3, Shelf B'),
 ];
 
 class _StepCard extends StatelessWidget {
@@ -3300,6 +3446,138 @@ class _ResultTile extends StatelessWidget {
   }
 }
 
+// ---------- Borrowing activity chart ----------
+
+const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+class _BorrowChart extends StatelessWidget {
+  const _BorrowChart({required this.transactions});
+  final List<BookTransaction> transactions;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    bool sameDay(DateTime? x, DateTime d) =>
+        x != null && x.year == d.year && x.month == d.month && x.day == d.day;
+
+    final days = List.generate(7, (i) {
+      final d = today.subtract(Duration(days: 6 - i));
+      return (
+        label: _weekdays[d.weekday - 1],
+        borrowed: transactions.where((t) => sameDay(t.borrowedOn, d)).length,
+        returned: transactions.where((t) => sameDay(t.returnedOn, d)).length,
+      );
+    });
+
+    var max = 1;
+    var totalB = 0;
+    var totalR = 0;
+    for (final d in days) {
+      if (d.borrowed > max) max = d.borrowed;
+      if (d.returned > max) max = d.returned;
+      totalB += d.borrowed;
+      totalR += d.returned;
+    }
+
+    const borrowedColor = Palette.burgundy;
+    const returnedColor = Color(0xFF0C7A43);
+
+    Widget bar(int n, Color c) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('$n',
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: n == 0 ? Colors.transparent : c)),
+            const SizedBox(height: 2),
+            Container(
+              width: 14,
+              height: n == 0 ? 3 : (n / max * 44).clamp(6, 44).toDouble(),
+              decoration: BoxDecoration(
+                color: n == 0 ? c.withAlpha(50) : c,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(3)),
+              ),
+            ),
+          ],
+        );
+
+    Widget legend(Color c, String text) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                    color: c, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(width: 6),
+            Text(text,
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w600)),
+          ],
+        );
+
+    return Card(
+      elevation: 0,
+      color: Palette.card,
+      shape: _cardShape,
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                legend(borrowedColor, 'Borrowed ($totalB)'),
+                const SizedBox(width: 16),
+                legend(returnedColor, 'Returned ($totalR)'),
+                const Spacer(),
+                const Text('Last 7 days',
+                    style: TextStyle(fontSize: 12, color: Palette.textMuted)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0x2655161D)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                for (final d in days)
+                  Expanded(
+                    child: Column(
+                      children: [
+                        SizedBox(
+                          height: 66,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              bar(d.borrowed, borrowedColor),
+                              const SizedBox(width: 3),
+                              bar(d.returned, returnedColor),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(d.label,
+                            style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Palette.textMuted)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ---------- Desk widgets ----------
 
 class _QuickAction extends StatelessWidget {
@@ -3393,10 +3671,12 @@ class _StatTile extends StatelessWidget {
                           color: Palette.burgundy)),
                 ),
                 Text(label,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w600)),
+                        fontSize: 11.5,
+                        height: 1.1,
+                        fontWeight: FontWeight.w600)),
               ],
             ),
           ),
@@ -3540,6 +3820,79 @@ class _RequestCard extends StatelessWidget {
   }
 }
 
+// ---------- Decline reason dialog ----------
+
+class _DeclineDialog extends StatefulWidget {
+  const _DeclineDialog({required this.request});
+  final LoanRequest request;
+
+  @override
+  State<_DeclineDialog> createState() => _DeclineDialogState();
+}
+
+class _DeclineDialogState extends State<_DeclineDialog> {
+  final _reason = TextEditingController();
+  final _key = GlobalKey<FormState>();
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.request;
+    return AlertDialog(
+      title: const Text('Decline Request'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _key,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Decline "${r.book.title}" requested by ${r.borrower}? '
+                'The reason will be shown to the borrower.',
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _reason,
+                autofocus: true,
+                maxLines: 4,
+                maxLength: 300,
+                decoration: _fieldDec(
+                    label: 'Reason for declining',
+                    hint: 'e.g. This book is reserved for a class.'),
+                validator: (v) => (v ?? '').trim().length < 5
+                    ? 'Please enter a reason (at least 5 characters).'
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            if (_key.currentState!.validate()) {
+              Navigator.pop(context, _reason.text.trim());
+            }
+          },
+          style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFC0121F)),
+          child: const Text('Decline'),
+        ),
+      ],
+    );
+  }
+}
+
 // ---------- Borrow requests page ----------
 
 class _RequestsBanner extends StatelessWidget {
@@ -3611,11 +3964,45 @@ class _RequestsScreenState extends State<_RequestsScreen> {
 
   Future<void> _decide(LoanRequest r, bool approve) async {
     if (_busy.contains(r.id)) return;
+
+    var reason = '';
+    if (approve) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Approve Request'),
+          content: Text(
+              'Are you sure you want to approve "${r.book.title}" for ${r.borrower}? '
+              'The loan starts today and is due in ${LibraryService.loanDays} days.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              style:
+                  FilledButton.styleFrom(backgroundColor: Palette.burgundy),
+              child: const Text('Yes, approve'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    } else {
+      final text = await showDialog<String>(
+        context: context,
+        builder: (_) => _DeclineDialog(request: r),
+      );
+      if (text == null) return;
+      reason = text;
+    }
+    if (!mounted) return;
+
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _busy.add(r.id));
     final err = approve
         ? await _lib.approveRequest(r.id)
-        : await _lib.declineRequest(r.id);
+        : await _lib.declineRequest(r.id, reason);
     if (mounted) setState(() => _busy.remove(r.id));
     messenger
       ..hideCurrentSnackBar()

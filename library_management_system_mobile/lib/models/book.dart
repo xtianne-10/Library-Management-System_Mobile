@@ -15,6 +15,8 @@ class Book {
     this.description = '',
     this.year,
     this.pages,
+    this.isbn = '',
+    this.shelf = '',
     this.totalCopies = 1,
     this.copiesAvailable = 1,
     this.isNewArrival = false,
@@ -35,6 +37,8 @@ class Book {
   final String description;
   final int? year;
   final int? pages;
+  final String isbn;
+  final String shelf;
   final int totalCopies;
   final int copiesAvailable;
   final bool isNewArrival;
@@ -60,6 +64,9 @@ class Book {
     Uint8List? imageBytes,
     int? totalCopies,
     int? copiesAvailable,
+    int? pages,
+    String? isbn,
+    String? shelf,
     bool clearImageBytes = false,
   }) =>
       Book(
@@ -72,7 +79,9 @@ class Book {
         color: color,
         description: description ?? this.description,
         year: year,
-        pages: pages,
+        pages: pages ?? this.pages,
+        isbn: isbn ?? this.isbn,
+        shelf: shelf ?? this.shelf,
         totalCopies: totalCopies ?? this.totalCopies,
         copiesAvailable: copiesAvailable ?? this.copiesAvailable,
         isNewArrival: isNewArrival,
@@ -114,6 +123,9 @@ class Book {
       published: DateTime.tryParse((j['published'] ?? '') as String),
       totalCopies: copies,
       copiesAvailable: copies,
+      isbn: (j['isbn'] ?? '').toString(),
+      pages: (j['pages'] as num?)?.toInt(),
+      shelf: (j['shelf'] ?? '').toString(),
       imageUrl: bytes == null && !img.startsWith('data:') ? img : '',
       imageBytes: bytes,
     );
@@ -134,6 +146,9 @@ class Book {
           ? 'data:image/jpeg;base64,${base64Encode(imageBytes!)}'
           : imageUrl,
       'copies': totalCopies,
+      'isbn': isbn,
+      'pages': pages,
+      'shelf': shelf,
     };
   }
 

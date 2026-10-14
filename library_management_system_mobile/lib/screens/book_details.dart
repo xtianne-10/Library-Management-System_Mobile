@@ -7,6 +7,12 @@ import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/globes/favorites_store.dart';
 
+const _monthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December',
+];
+String _fmtDate(DateTime d) => '${_monthNames[d.month - 1]} ${d.day}, ${d.year}';
+
 void openBookDetails(BuildContext context, Book book) {
   Navigator.push(
     context,
@@ -21,7 +27,7 @@ class BookDetailsScreen extends StatelessWidget {
 
   // Negative years are BC
   String get _yearLabel {
-    final y = book.year;
+    final y = book.year ?? book.published?.year;
     if (y == null) return '—';
     return y < 0 ? '${-y} BC' : '$y';
   }
@@ -337,7 +343,10 @@ class BookDetailsScreen extends StatelessWidget {
                       ],
 
                       // Details
-                      if (book.publisher.isNotEmpty) ...[
+                      if (book.published != null ||
+                          book.publisher.isNotEmpty ||
+                          book.isbn.isNotEmpty ||
+                          book.shelf.isNotEmpty) ...[
                         const SizedBox(height: 28),
                         Text('Details',
                             style: text.titleLarge?.copyWith(
@@ -345,7 +354,23 @@ class BookDetailsScreen extends StatelessWidget {
                               color: Palette.burgundy,
                             )),
                         const SizedBox(height: 10),
-                        _DetailRow(label: 'Publisher', value: book.publisher),
+                        if (book.published != null)
+                          _DetailRow(
+                              label: 'Published',
+                              value: _fmtDate(book.published!)),
+                        if (book.published != null &&
+                            book.publisher.isNotEmpty)
+                          const SizedBox(height: 8),
+                        if (book.publisher.isNotEmpty)
+                          _DetailRow(label: 'Publisher', value: book.publisher),
+                        if (book.isbn.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          _DetailRow(label: 'ISBN', value: book.isbn),
+                        ],
+                        if (book.shelf.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          _DetailRow(label: 'Shelf / Location', value: book.shelf),
+                        ],
                       ],
                     ],
                   ),

@@ -762,6 +762,34 @@ class _DeclinedCard extends StatelessWidget {
           value: _fmt(declinedOn),
           color: red,
         ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: red.withAlpha(80)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('REASON',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                      color: red)),
+              const SizedBox(height: 4),
+              Text(
+                request.declineReason.isEmpty
+                    ? 'No reason was given.'
+                    : request.declineReason,
+                style: const TextStyle(fontSize: 14, color: Palette.textDark),
+              ),
+            ],
+          ),
+        ),
       ],
       actions: [
         Expanded(
