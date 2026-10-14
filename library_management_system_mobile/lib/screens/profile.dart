@@ -39,6 +39,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadFromUser();
+    FavoritesStore.instance.load();
     AuthService.instance.refresh().then((_) {
       if (mounted && !_editing) setState(_loadFromUser);
     });
@@ -298,6 +299,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _logout() {
+    FavoritesStore.instance.clear();
     AuthService.instance.logout();
     Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
   }
@@ -580,6 +582,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 value: store.items.length, label: 'Borrowed'),
                             const _StatDivider(),
                             _StatTile(
+                                value: store.myPendingRequests.length,
+                                label: 'Pending'),
+                            const _StatDivider(),
+                            _StatTile(
                               value: store.overdue.length,
                               label: 'Overdue',
                               color: store.overdue.isEmpty
@@ -626,7 +632,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             child: Row(
                               children: [
                                 const Icon(Icons.favorite,
-                                    color: Palette.burgundy),
+                                    color: Color(0xFFEF4444)),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Text('My favorites',

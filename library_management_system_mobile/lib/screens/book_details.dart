@@ -26,15 +26,16 @@ class BookDetailsScreen extends StatelessWidget {
     return y < 0 ? '${-y} BC' : '$y';
   }
 
-  void _toggleFavorite(BuildContext context) {
+  Future<void> _toggleFavorite(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
     final wasFav = FavoritesStore.instance.isFavorite(book);
-    FavoritesStore.instance.toggle(book);
-    ScaffoldMessenger.of(context)
+    final err = await FavoritesStore.instance.toggle(book);
+    messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
         duration: const Duration(seconds: 1),
-        content: Text(
-            wasFav ? 'Removed from favorites' : 'Added to favorites'),
+        content: Text(err ??
+            (wasFav ? 'Removed from favorites' : 'Added to favorites')),
       ));
   }
 
@@ -63,6 +64,8 @@ class BookDetailsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final topInset = MediaQuery.of(context).padding.top;
+
+    FavoritesStore.instance.ensureLoaded();
 
     // Header gradient
     final hsl = HSLColor.fromColor(book.color);
@@ -186,7 +189,9 @@ class BookDetailsScreen extends StatelessWidget {
                               tooltip: isFav
                                   ? 'Remove from favorites'
                                   : 'Add to favorites',
-                              iconColor: isFav ? Palette.amber : Colors.white,
+                              iconColor: isFav
+                                  ? const Color(0xFFF87171)
+                                  : Colors.white,
                               onPressed: () => _toggleFavorite(context),
                             ),
                           ],

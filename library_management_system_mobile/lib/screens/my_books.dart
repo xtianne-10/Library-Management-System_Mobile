@@ -9,13 +9,14 @@ import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 
 enum _Filter {
-  current('Current'),
-  pending('Pending'),
-  overdue('Overdue'),
-  history('History');
+  current('Current', 'borrowed'),
+  pending('Pending', 'pending'),
+  overdue('Overdue', 'overdue'),
+  history('History', 'in history');
 
-  const _Filter(this.label);
+  const _Filter(this.label, this.summaryLabel);
   final String label;
+  final String summaryLabel;
 }
 
 const _months = [
@@ -26,6 +27,7 @@ String _fmt(DateTime d) => '${_months[d.month - 1]} ${d.day}, ${d.year}';
 
 const _cardColor = Colors.white;
 const _cardBorder = Color(0x1A000000);
+const _pageSize = 15;
 
 ButtonStyle _detailsButtonStyle() => FilledButton.styleFrom(
       backgroundColor: Palette.burgundy,
@@ -45,12 +47,31 @@ class MyBooksScreen extends StatefulWidget {
 
 class _MyBooksScreenState extends State<MyBooksScreen> {
   _Filter _filter = _Filter.current;
+  int _page = 1;
+  final ScrollController _scroll = ScrollController();
   bool _argsRead = false;
 
   @override
   void initState() {
     super.initState();
     LibraryService.instance.reload();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _changePage(int p) {
+    setState(() => _page = p);
+    if (_scroll.hasClients) {
+      _scroll.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
   @override
@@ -84,33 +105,15 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
               _Filter.history:
                   store.history.length + store.myDeclinedRequests.length,
             };
-            final activeCount = store.items.length;
-            final overdueCount = store.overdue.length;
-            final pendingCount = pendingReqs.length;
+            final summary = '${counts[_filter]} ${_filter.summaryLabel}';
 
-            final summaryParts = <String>[
-              if (activeCount > 0) '$activeCount borrowed',
-              if (overdueCount > 0) '$overdueCount overdue',
-              if (pendingCount > 0) '$pendingCount pending',
-            ];
-            final summary = summaryParts.isEmpty
-                ? 'Nothing borrowed right now.'
-                : summaryParts.join('  •  ');
-
-            // Body for the selected tab
-            Widget list;
+                        // Build all cards for the selected tab
+            final List<Widget> cards;
             if (_filter == _Filter.pending) {
-              list = pendingReqs.isEmpty
-                  ? _EmptyState(filter: _filter)
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                      itemCount: pendingReqs.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 14),
-                      itemBuilder: (context, i) => _RequestCard(
-                        key: ValueKey(pendingReqs[i].id),
-                        request: pendingReqs[i],
-                      ),
-                    );
+              cards = [
+                for (final r in pendingReqs)
+                  _RequestCard(key: ValueKey(r.id), request: r),
+              ];
             } else if (_filter == _Filter.history) {
               // returned loans + declined requests, newest first
               final entries = <(DateTime, Widget)>[
@@ -122,33 +125,44 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
                     _DeclinedCard(key: ValueKey('d${d.id}'), request: d)
                   ),
               ]..sort((a, b) => b.$1.compareTo(a.$1));
-              list = entries.isEmpty
-                  ? _EmptyState(filter: _filter)
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                      itemCount: entries.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 14),
-                      itemBuilder: (context, i) => entries[i].$2,
-                    );
+              cards = [for (final e in entries) e.$2];
             } else {
-              final loans = switch (_filter) {
-                _Filter.current => store.current,
-                _Filter.overdue => store.overdue,
-                _Filter.history => store.history,
-                _Filter.pending => const <BorrowedBook>[],
-              };
-              list = loans.isEmpty
-                  ? _EmptyState(filter: _filter)
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                      itemCount: loans.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 14),
-                      itemBuilder: (context, i) => _LoanCard(
-                        key: ValueKey(loans[i].txId),
-                        loan: loans[i],
-                      ),
-                    );
+              final loans =
+                  _filter == _Filter.overdue ? store.overdue : store.current;
+              cards = [
+                for (final l in loans)
+                  _LoanCard(key: ValueKey(l.txId), loan: l),
+              ];
             }
+
+            // Slice the current page
+            final totalPages =
+                cards.isEmpty ? 1 : (cards.length / _pageSize).ceil();
+            final currentPage = _page > totalPages ? totalPages : _page;
+            final start = (currentPage - 1) * _pageSize;
+            final end = start + _pageSize > cards.length
+                ? cards.length
+                : start + _pageSize;
+            final pageItems = cards.sublist(start, end);
+
+            final Widget list = cards.isEmpty
+                ? _EmptyState(filter: _filter)
+                : ListView.separated(
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                    itemCount: pageItems.length + 1, // +1 = pagination footer
+                    separatorBuilder: (_, __) => const SizedBox(height: 14),
+                    itemBuilder: (context, i) {
+                      if (i < pageItems.length) return pageItems[i];
+                      return _PaginationBar(
+                        shown: pageItems.length,
+                        total: cards.length,
+                        page: currentPage,
+                        totalPages: totalPages,
+                        onChange: _changePage,
+                      );
+                    },
+                  );
 
             return Column(
               children: [
@@ -195,7 +209,10 @@ class _MyBooksScreenState extends State<MyBooksScreen> {
                                   alert: f == _Filter.overdue &&
                                       counts[f]! > 0,
                                   onTap: () {
-                                    setState(() => _filter = f);
+                                    setState(() {
+                                      _filter = f;
+                                      _page = 1;
+                                    });
                                     if (f == _Filter.history) {
                                       BorrowStore.instance.markDeclinedSeen();
                                     }
@@ -285,6 +302,109 @@ class _SegmentButton extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// Pagination
+
+List<Object> _pageNumbers(int page, int total) {
+  if (total <= 7) return [for (var i = 1; i <= total; i++) i];
+  final shown = {1, total, page - 1, page, page + 1}
+      .where((p) => p >= 1 && p <= total)
+      .toList()
+    ..sort();
+  final out = <Object>[];
+  for (var i = 0; i < shown.length; i++) {
+    if (i > 0 && shown[i] - shown[i - 1] > 1) out.add('…');
+    out.add(shown[i]);
+  }
+  return out;
+}
+
+class _PaginationBar extends StatelessWidget {
+  const _PaginationBar({
+    required this.shown,
+    required this.total,
+    required this.page,
+    required this.totalPages,
+    required this.onChange,
+  });
+
+  final int shown;
+  final int total;
+  final int page;
+  final int totalPages;
+  final ValueChanged<int> onChange;
+
+  Widget _btn(String label, {VoidCallback? onTap, bool selected = false}) {
+    return Opacity(
+      opacity: onTap == null ? 0.4 : 1,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 36),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? Palette.burgundy : Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: selected ? Palette.burgundy : const Color(0xFF9CA3AF),
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected ? Colors.white : Palette.textDark,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        children: [
+          Text(
+            'Showing $shown of $total',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Palette.textMuted),
+          ),
+          if (totalPages > 1) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _btn('Prev', onTap: page > 1 ? () => onChange(page - 1) : null),
+                for (final p in _pageNumbers(page, totalPages))
+                  if (p is int)
+                    _btn('$p', selected: p == page, onTap: () => onChange(p))
+                  else
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4),
+                      child: Text('…',
+                          style: TextStyle(color: Palette.textMuted)),
+                    ),
+                _btn('Next',
+                    onTap: page < totalPages ? () => onChange(page + 1) : null),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }
