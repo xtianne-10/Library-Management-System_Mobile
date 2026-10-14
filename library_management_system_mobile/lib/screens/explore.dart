@@ -1216,7 +1216,7 @@ class _PromoBanner extends StatelessWidget {
                     children: [
                       const TextSpan(text: 'Borrow any available book for '),
                       TextSpan(
-                        text: '7 days',
+                        text: '14 days',
                         style: TextStyle(color: Palette.gold),
                       ),
                       const TextSpan(text: '.'),

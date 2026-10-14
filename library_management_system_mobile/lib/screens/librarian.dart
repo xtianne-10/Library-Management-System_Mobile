@@ -14,6 +14,7 @@ import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 import 'package:library_management_system_mobile/screens/verify_return.dart';
+import 'package:library_management_system_mobile/screens/profile.dart';
 import 'package:library_management_system_mobile/utils/validators.dart';
 import 'package:library_management_system_mobile/utils/confirm_dialog.dart';
 
@@ -258,31 +259,10 @@ class _LibNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return NavigationBarTheme(
-      data: NavigationBarThemeData(
-        labelTextStyle: WidgetStateProperty.resolveWith((states) {
-          final on = states.contains(WidgetState.selected);
-          return TextStyle(
-            fontSize: 12,
-            fontWeight: on ? FontWeight.w700 : FontWeight.w500,
-            color: on ? Palette.amber : Palette.creamMuted,
-          );
-        }),
-        iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
-              color: states.contains(WidgetState.selected)
-                  ? Palette.amber
-                  : Palette.creamLight,
-            )),
-      ),
-      child: NavigationBar(
+    // No custom colors: inherits the same theme as the borrower's AppNavBar.
+    return NavigationBar(
       selectedIndex: index,
       onDestinationSelected: onChanged,
-      backgroundColor: Palette.burgundy,
-      surfaceTintColor: Colors.transparent,
-      shadowColor: Colors.black26,
-      elevation: 8,
-      indicatorColor: Colors.white.withAlpha(30),
-      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       destinations: [
         const NavigationDestination(
             icon: Icon(Icons.dashboard_outlined),
@@ -309,7 +289,6 @@ class _LibNavBar extends StatelessWidget {
             selectedIcon: Icon(Icons.person),
             label: 'Profile'),
       ],
-      ),
     );
   }
 }
@@ -1333,7 +1312,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
       value: SystemUiOverlayStyle.light,
       child: Container(
         padding: EdgeInsets.fromLTRB(
-            20, MediaQuery.of(context).padding.top + 10, 20, 16),
+            20, MediaQuery.of(context).padding.top + 12, 12, 20),
         decoration: const BoxDecoration(
           color: Palette.burgundy,
           borderRadius: BorderRadius.only(
@@ -1366,7 +1345,13 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${_greeting()}, $name',
+                  Text('${_greeting()},',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodyMedium
+                          ?.copyWith(color: Palette.creamMuted)),
+                  const SizedBox(height: 2),
+                  Text(name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: text.titleLarge?.copyWith(
@@ -1374,23 +1359,27 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                           color: Palette.creamLight)),
                   const SizedBox(height: 2),
                   Text('Keeper of the Hogwarts Library',
-                      style: text.bodyMedium
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodySmall
                           ?.copyWith(color: Palette.creamMuted)),
                 ],
               ),
             ),
             IconButton(
               tooltip: 'Borrow requests',
+              visualDensity: VisualDensity.compact,
               onPressed: _openRequests,
               icon: Badge(
                 isLabelVisible: _lib.pendingRequests.isNotEmpty,
                 label: Text('${_lib.pendingRequests.length}'),
                 child: const Icon(Icons.how_to_reg,
-                    color: Palette.creamLight, size: 28),
+                    color: Palette.creamLight, size: 26),
               ),
             ),
             IconButton(
               tooltip: 'Notifications',
+              visualDensity: VisualDensity.compact,
               style: IconButton.styleFrom(
                   backgroundColor: Colors.white.withAlpha(25)),
               onPressed: () {
@@ -1408,7 +1397,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                 isLabelVisible: _unseenCount > 0,
                 label: Text('$_unseenCount'),
                 child: const Icon(Icons.notifications_outlined,
-                    color: Palette.creamLight, size: 28),
+                    color: Palette.creamLight, size: 26),
               ),
             ),
           ],
@@ -1514,9 +1503,11 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
 
     return Scaffold(
       backgroundColor: Palette.page,
-      appBar: PreferredSize(
+      appBar: _tab == 3
+          ? null
+          : PreferredSize(
         preferredSize:
-            Size.fromHeight(82 + MediaQuery.of(context).padding.top),
+            Size.fromHeight(112 + MediaQuery.of(context).padding.top),
         child: _header(),
       ),
       bottomNavigationBar: _LibNavBar(
@@ -1535,7 +1526,9 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         icon: const Icon(Icons.add),
         label: const Text('Add Book'),
       ),
-      body: ListView(
+      body: _tab == 3
+          ? ProfileScreen(embedded: true, onAddLibrarian: _addLibrarian)
+          : ListView(
         key: ValueKey(_tab),
         padding: const EdgeInsets.fromLTRB(20, 24, 20, 96),
         children: [

@@ -12,7 +12,17 @@ import 'package:library_management_system_mobile/globes/favorites_store.dart';
 import 'package:library_management_system_mobile/screens/favorites.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({
+    super.key,
+    this.embedded = false,
+    this.onAddLibrarian,
+  });
+
+  /// True when shown as a tab inside LibrarianScreen (no back button).
+  final bool embedded;
+
+  /// Only used by the librarian tab. Opens the "Add librarian" dialog.
+  final VoidCallback? onAddLibrarian;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -40,6 +50,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadFromUser();
+    for (final c in [
+      _first,
+      _last,
+      _email,
+      _phone,
+      _id,
+      _course,
+      _year,
+      _department,
+      _assigned,
+    ]) {
+      c.addListener(_onFieldChanged);
+    }
     FavoritesStore.instance.load();
     AuthService.instance.refresh().then((_) {
       if (mounted && !_editing) setState(_loadFromUser);
@@ -81,6 +104,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  void _onFieldChanged() {
+    if (_editing && mounted) setState(() {});
+  }
+
+  // True only when a field differs from the saved profile
+  bool get _hasChanges {
+    final u = AuthService.instance.currentUser;
+    if (u == null) return false;
+    String t(TextEditingController c) => c.text.trim();
+    return t(_first) != u.firstName.trim() ||
+        t(_last) != u.lastName.trim() ||
+        t(_email) != u.email.trim() ||
+        t(_phone) != u.phone.trim() ||
+        t(_id) != u.idNumber.trim() ||
+        t(_course) != u.course.trim() ||
+        t(_year) != u.yearLevel.trim() ||
+        t(_department) != u.department.trim() ||
+        t(_assigned) != u.assignedRole.trim();
   }
 
   void _startEdit() => setState(() {
@@ -202,33 +245,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Future<void> _confirmLogout() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Log out?'),
-        content: const Text('Are you sure you want to log out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            style: TextButton.styleFrom(foregroundColor: Palette.textMuted),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFE00000),
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Log out'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true && mounted) _logout();
+    Future<void> _confirmLogout() async {
+    final ok = await confirmDialog(
+        context, 'Log out?', 'Are you sure you want to log out?', 'Log out',
+        danger: true);
+    if (ok && mounted) _logout();
   }
 
-  Future<void> _changePassword() async {
+    Future<void> _changePassword() async {
     final cur = TextEditingController();
     final next = TextEditingController();
     final conf = TextEditingController();
@@ -236,17 +260,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     InputDecoration dec(String label) => InputDecoration(
           labelText: label,
+          filled: true,
+          fillColor: Colors.white,
           isDense: true,
-          border: const OutlineInputBorder(),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0x4055161D)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0x4055161D)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Palette.burgundy, width: 2),
+          ),
         );
 
     final ok = await showDialog<bool>(
       context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Change Password'),
-        content: SingleChildScrollView(
+      builder: (c) => StatefulBuilder(
+        builder: (c, setDialog) => AppDialog(
+          title: 'Change Password',
+          icon: Icons.lock_reset,
+          confirmLabel: 'Update',
+          confirmEnabled:
+              cur.text.isNotEmpty && next.text.isNotEmpty && conf.text.isNotEmpty,
+          onCancel: () => Navigator.pop(c, false),
+          onConfirm: () async {
+            if (!key.currentState!.validate()) return;
+            final yes = await confirmDialog(
+                c, 'Change Password', 'Change your password?', 'Yes, change');
+            if (yes && c.mounted) Navigator.pop(c, true);
+          },
           child: Form(
             key: key,
+            onChanged: () => setDialog(() {}),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -285,20 +336,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () async {
-              if (!key.currentState!.validate()) return;
-              final yes = await confirmDialog(c, 'Change Password',
-                  'Change your password?', 'Yes, change');
-              if (yes && c.mounted) Navigator.pop(c, true);
-            },
-            child: const Text('Update'),
-          ),
-        ],
       ),
     );
     if (ok == true) {
@@ -495,7 +532,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 child: Column(
                   children: [
-                    if (isLibrarian)
+                    if (isLibrarian && !widget.embedded)
                       Align(
                         alignment: Alignment.centerLeft,
                         child: IconButton(
@@ -698,12 +735,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       width: double.infinity,
                       child: _editing
                           ? FilledButton.icon(
-                              onPressed: _save,
+                              onPressed: _hasChanges ? _save : null,
                               icon: const Icon(Icons.check, size: 18),
                               label: const Text('Save changes'),
                               style: FilledButton.styleFrom(
                                 backgroundColor: Palette.burgundy,
                                 foregroundColor: Colors.white,
+                                disabledBackgroundColor:
+                                    Palette.burgundy.withValues(alpha: 0.4),
+                                disabledForegroundColor: Colors.white,
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 14),
                                 shape: RoundedRectangleBorder(
@@ -742,6 +782,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           onPressed: _changePassword,
                           icon: const Icon(Icons.lock_reset, size: 18),
                           label: const Text('Change password'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Palette.burgundy,
+                            side: const BorderSide(color: Palette.burgundy),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (isLibrarian &&
+                        user.isHead &&
+                        widget.onAddLibrarian != null) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: widget.onAddLibrarian,
+                          icon: const Icon(Icons.person_add_alt_1_outlined,
+                              size: 18),
+                          label: const Text('Add librarian'),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Palette.burgundy,
                             side: const BorderSide(color: Palette.burgundy),
