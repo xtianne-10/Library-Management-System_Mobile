@@ -131,7 +131,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _editing = true;
       });
 
-  void _cancelEdit() {
+  Future<void> _cancelEdit() async {
+    if (_hasChanges) {
+      final ok = await confirmDialog(context, 'Discard Changes',
+          'You have unsaved changes. Discard them?', 'Yes, discard',
+          danger: true);
+      if (!ok || !mounted) return;
+    }
     _formKey.currentState?.reset();
     _loadFromUser();
     setState(() {
@@ -288,7 +294,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           confirmLabel: 'Update',
           confirmEnabled:
               cur.text.isNotEmpty && next.text.isNotEmpty && conf.text.isNotEmpty,
-          onCancel: () => Navigator.pop(c, false),
+          onCancel: () async {
+            final dirty = cur.text.isNotEmpty ||
+                next.text.isNotEmpty ||
+                conf.text.isNotEmpty;
+            if (dirty) {
+              final ok = await confirmDialog(c, 'Discard Changes',
+                  'You have unsaved changes. Discard them?', 'Yes, discard',
+                  danger: true);
+              if (!ok || !c.mounted) return;
+            }
+            if (c.mounted) Navigator.pop(c, false);
+          },
           onConfirm: () async {
             if (!key.currentState!.validate()) return;
             final yes = await confirmDialog(

@@ -13,7 +13,7 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  static const _fg = Palette.cream;
+  static const _fg = Palette.burgundy;
 
   final _formKey = GlobalKey<FormState>();
   final _first = TextEditingController();
@@ -113,8 +113,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: Container(
             height: 112,
             decoration: BoxDecoration(
-              color: Palette.cream,
+              color: Colors.white,
               borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Palette.burgundy.withValues(alpha: 0.25)),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -158,7 +159,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     return DropdownButtonFormField<String>(
       value: _yearLevel,
-      dropdownColor: Palette.burgundy,
+      dropdownColor: authLoginBg,
       iconEnabledColor: _fg,
       style: const TextStyle(fontSize: 17, color: _fg),
       autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -168,9 +169,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         prefixIcon: const Icon(Icons.grade_outlined, size: 20, color: _fg),
         enabledBorder: line(_fg.withValues(alpha: 0.7)),
         focusedBorder: line(_fg, 1.5),
-        errorBorder: line(authErrorOnDark),
-        focusedErrorBorder: line(authErrorOnDark, 1.5),
-        errorStyle: const TextStyle(color: authErrorOnDark),
+        errorBorder: line(authErrorOnLight),
+        focusedErrorBorder: line(authErrorOnLight, 1.5),
+        errorStyle: TextStyle(color: authErrorOnLight),
       ),
       items: [
         for (final y in yearLevelOptions)
@@ -200,7 +201,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           hint: hint,
           icon: icon,
           color: _fg,
-          errorColor: authErrorOnDark,
+          errorColor: authErrorOnLight,
           password: password,
           keyboardType: type,
           textInputAction: action,
@@ -281,15 +282,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
               password: true,
               action: TextInputAction.done,
               onSubmitted: _submit),
-          AuthError(_error, color: authErrorOnDark),
+          AuthError(_error, color: authErrorOnLight),
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
               onPressed: _submit,
               style: FilledButton.styleFrom(
-                backgroundColor: Palette.cream,
-                foregroundColor: Palette.burgundy,
+                backgroundColor: Palette.burgundy,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(6),
@@ -319,7 +320,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Palette.burgundy,
+      backgroundColor: authLoginBg,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(

@@ -131,10 +131,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Text(
-                      'Demo: student@, professor@ or librarian@hogwarts.com / hogwarts1',
-                      style: TextStyle(fontSize: 12, color: Palette.textMuted),
-                    ),
                   ],
                 ),
               ),

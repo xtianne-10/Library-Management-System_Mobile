@@ -20,6 +20,13 @@ import 'package:library_management_system_mobile/utils/confirm_dialog.dart';
 
 const _confirmDialog = confirmDialog;
 
+Future<bool> _confirmDiscard(BuildContext context, bool dirty) async {
+  if (!dirty) return true;
+  return _confirmDialog(context, 'Discard Changes',
+      'You have unsaved changes. Discard them?', 'Yes, discard',
+      danger: true);
+}
+
 const _categories = ['Fiction', 'Non-Fiction', 'Academic', 'Restricted'];
 
 const _otherReason = 'Other';
@@ -1082,7 +1089,14 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false),
+              onPressed: () async {
+                final dirty = first.text.trim() != u.firstName.trim() ||
+                    last.text.trim() != u.lastName.trim() ||
+                    phone.text.trim() != u.phone.trim();
+                if (await _confirmDiscard(c, dirty) && c.mounted) {
+                  Navigator.pop(c, false);
+                }
+              },
               child: const Text('Cancel')),
           FilledButton(
             onPressed: () async {
@@ -1165,7 +1179,14 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false),
+              onPressed: () async {
+                final dirty = cur.text.isNotEmpty ||
+                    next.text.isNotEmpty ||
+                    conf.text.isNotEmpty;
+                if (await _confirmDiscard(c, dirty) && c.mounted) {
+                  Navigator.pop(c, false);
+                }
+              },
               child: const Text('Cancel')),
           FilledButton(
             onPressed: () async {
@@ -1266,8 +1287,14 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           ),
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
+         TextButton(
+              onPressed: () async {
+                final dirty = [first, last, id, email, phone, pass]
+                    .any((x) => x.text.trim().isNotEmpty);
+                if (await _confirmDiscard(c, dirty) && c.mounted) {
+                  Navigator.pop(c, false);
+                }
+              },
               child: const Text('Cancel')),
           FilledButton(
             onPressed: () async {
@@ -2901,6 +2928,23 @@ class _BookFormState extends State<_BookForm> {
   DateTime? _published;
   Uint8List? _bytes;
   String? _fileError;
+  String _initial = '';
+
+  String _sig() => [
+        _title.text.trim(), _author.text.trim(), _publisher.text.trim(),
+        _desc.text.trim(), _image.text.trim(), _copies.text.trim(),
+        _isbn.text.trim(), _pages.text.trim(), _shelf.text.trim(),
+        _category ?? '', _published?.toIso8601String() ?? '',
+        '${_bytes?.length ?? 0}',
+      ].join('|');
+
+  bool get _dirty => _sig() != _initial;
+
+  Future<void> _close() async {
+    if (await _confirmDiscard(context, _dirty) && mounted) {
+      Navigator.pop(context);
+    }
+  }
 
   bool get _editing => widget.book != null;
 
@@ -2912,6 +2956,7 @@ class _BookFormState extends State<_BookForm> {
         : null;
     _published = widget.book?.published;
     _bytes = widget.book?.imageBytes;
+    _initial = _sig();
   }
 
   @override
@@ -3006,7 +3051,12 @@ class _BookFormState extends State<_BookForm> {
     final previewUrl =
         Validators.imageUrl(_image.text) == null ? _image.text.trim() : '';
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _close();
+      },
+      child: Scaffold(
       backgroundColor: Palette.page,
       appBar: AppBar(
         backgroundColor: Palette.burgundy,
@@ -3171,7 +3221,7 @@ class _BookFormState extends State<_BookForm> {
                   const SizedBox(width: 16),
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: _close,
                       child: const Text('Cancel'),
                     ),
                   ),
@@ -3180,6 +3230,7 @@ class _BookFormState extends State<_BookForm> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
