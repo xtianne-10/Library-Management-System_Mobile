@@ -14,6 +14,7 @@ class BorrowedBook {
     required this.borrowedOn,
     required this.dueOn,
     this.returnedOn,
+    this.pendingReturn = false,
   });
 
   final int txId;
@@ -21,6 +22,7 @@ class BorrowedBook {
   final DateTime borrowedOn;
   final DateTime dueOn;
   final DateTime? returnedOn;
+  final bool pendingReturn;
 
   bool get isReturned => returnedOn != null;
 
@@ -80,6 +82,7 @@ class BorrowStore extends ChangeNotifier {
           borrowedOn: t.borrowedOn,
           dueOn: _dateOnly(t.due),
           returnedOn: t.returnedOn,
+          pendingReturn: t.pendingReturn,
         ),
     ];
   }

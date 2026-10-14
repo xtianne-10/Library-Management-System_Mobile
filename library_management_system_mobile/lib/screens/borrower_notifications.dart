@@ -17,7 +17,9 @@ DateTime _day(DateTime d) => DateTime(d.year, d.month, d.day);
 String _days(int n) => '$n ${n == 1 ? 'day' : 'days'}';
 
 class BorrowerNote {
-  const BorrowerNote(this.key, this.icon, this.title, this.sub, this.color);
+  const BorrowerNote(this.key, this.icon, this.title, this.sub, this.color,
+      [this.at]);
+  final DateTime? at;
   final String key;
   final IconData icon;
   final String title;
@@ -27,6 +29,7 @@ class BorrowerNote {
 
 // Keys of notifications the borrower has already opened (this session)
 final Set<String> _seen = {};
+final Set<String> _cleared = {};
 
 List<BorrowerNote> borrowerNotifications() {
   final me = AuthService.instance.currentUser?.email ?? '';
@@ -75,22 +78,31 @@ List<BorrowerNote> borrowerNotifications() {
         r.declineReason.isEmpty
             ? 'No reason was given.'
             : 'Reason: ${r.declineReason}',
-        _red));
+        _red,
+        r.decidedOn ?? r.requestedOn));
   }
   for (final t in active.where((t) => recent(t.borrowedOn))) {
     out.add(BorrowerNote('approved|${t.id}', Icons.check_circle_outline,
-        'Borrow approved: ${t.title}', 'Due ${_fmt(t.due)}.', _green));
+        'Borrow approved: ${t.title}', 'Due ${_fmt(t.due)}.', _green,
+        t.borrowedOn));
   }
   for (final r in requests.where((r) => !r.declined)) {
     out.add(BorrowerNote('pending|${r.id}', Icons.hourglass_top_rounded,
         'Request sent: ${r.book.title}', 'Waiting for librarian approval.',
-        Palette.amber));
+        Palette.amber, r.requestedOn));
   }
   for (final t in loans.where((t) => t.returned && recent(t.returnedOn))) {
     out.add(BorrowerNote('returned|${t.id}', Icons.assignment_return_outlined,
-        'Returned: ${t.title}', 'Returned on ${_fmt(t.returnedOn!)}.', _green));
+        'Returned: ${t.title}', 'Returned on ${_fmt(t.returnedOn!)}.', _green,
+        t.returnedOn));
   }
-  return out;
+  // Alerts that need action stay on top; the rest go newest first
+  final alerts = out.where((n) => n.at == null).toList();
+  final events = out.where((n) => n.at != null).toList()
+    ..sort((a, b) => b.at!.compareTo(a.at!));
+  return [...alerts, ...events]
+      .where((n) => !_cleared.contains(n.key))
+      .toList();
 }
 
 int unseenBorrowerCount() =>
@@ -98,6 +110,9 @@ int unseenBorrowerCount() =>
 
 void markBorrowerNotesSeen() =>
     _seen.addAll(borrowerNotifications().map((n) => n.key));
+
+void clearBorrowerNotes() =>
+    _cleared.addAll(borrowerNotifications().map((n) => n.key));
 
 class BorrowerNotificationsScreen extends StatefulWidget {
   const BorrowerNotificationsScreen({super.key});
@@ -136,6 +151,13 @@ class _BorrowerNotificationsScreenState
           title: const Text('Notifications',
               style: TextStyle(
                   fontFamily: 'Georgia', fontWeight: FontWeight.w700)),
+          actions: [
+            TextButton(
+              onPressed: () => setState(clearBorrowerNotes),
+              style: TextButton.styleFrom(foregroundColor: Palette.creamLight),
+              child: const Text('Clear all'),
+            ),
+          ],
         ),
         body: ListenableBuilder(
           listenable: LibraryService.instance,

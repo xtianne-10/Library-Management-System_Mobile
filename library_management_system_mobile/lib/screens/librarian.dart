@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -10,12 +11,24 @@ import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/services/auth_service.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
+import 'package:library_management_system_mobile/screens/verify_return.dart';
 import 'package:library_management_system_mobile/utils/validators.dart';
 import 'package:library_management_system_mobile/utils/confirm_dialog.dart';
 
 const _confirmDialog = confirmDialog;
 
 const _categories = ['Fiction', 'Non-Fiction', 'Academic', 'Restricted'];
+
+const _otherReason = 'Other';
+const _declineReasons = [
+  'You have an overdue book.',
+  'You have an unpaid fine.',
+  "You've reached the borrowing limit.",
+  'This book is reserved for a class.',
+  'No copies are available right now.',
+  'This book is for restricted use only.',
+  _otherReason,
+];
 
 String _cleanIsbn(String s) => s.replaceAll(RegExp(r'[\s-]'), '').toUpperCase();
 
@@ -181,7 +194,9 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   int _borrowerView = 0; // 0 = Lookup, 1 = Transactions
 
   final Set<String> _seenNotes = {};
+  final Set<String> _clearedNotes = {};
   final Set<int> _returning = {};
+  Timer? _poll;
 
   String _noteKey((IconData, String, String, Color) n) => '${n.$2}|${n.$3}';
   int get _unseenCount =>
@@ -230,6 +245,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     }
     _lib.addListener(_refresh);
     _lib.ensureLoaded();
+    _poll = Timer.periodic(const Duration(seconds: 10), (_) => _lib.reload());
     AuthService.instance.refresh().then((_) => _refresh());
   }
 
@@ -240,6 +256,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   @override
   void dispose() {
     _lib.removeListener(_refresh);
+    _poll?.cancel();
     super.dispose();
   }
 
@@ -393,6 +410,8 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   int _countFor(String f) => switch (f) {
         'Not Returned' => _lib.transactions.where((t) => !t.returned).length,
         'Overdue' => _lib.transactions.where((t) => t.overdue).length,
+        'Pending Return' =>
+          _lib.transactions.where((t) => t.pendingReturn).length,
         'Returned' => _lib.transactions.where((t) => t.returned).length,
         _ => _lib.transactions.length,
       };
@@ -449,7 +468,8 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               child: _QuickAction(
                   icon: Icons.assignment_return_outlined,
                   label: 'Returns',
-                  onTap: () => _goTransactions('Not Returned'))),
+                  badge: _lib.transactions.where((t) => t.pendingReturn).length,
+                  onTap: _openVerifyReturn)),
           const SizedBox(width: 10),
           Expanded(
               child: _QuickAction(
@@ -652,6 +672,16 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         Palette.amber
       ));
     }
+    for (final t in _lib.transactions) {
+      if (t.pendingReturn) {
+        out.add((
+          Icons.assignment_return_outlined,
+          'Return request: ${t.title}',
+          '${t.borrower} is waiting for return verification.',
+          Palette.amber
+        ));
+      }
+    }
     for (final b in _lib.books) {
       if (_lib.copiesLeft(b) == 0) {
         out.add((
@@ -662,8 +692,11 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         ));
       }
     }
-    return out;
+    return out.where((n) => !_clearedNotes.contains(_noteKey(n))).toList();
   }
+
+  void _clearNotes() =>
+      setState(() => _clearedNotes.addAll(_notifications().map(_noteKey)));
 
   // Swap for the real field once AppUser has employeeId.
   String _employeeId(AppUser? u) {
@@ -1204,8 +1237,8 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        _NotificationsScreen(source: _notifications),
+                    builder: (_) => _NotificationsScreen(
+                        source: _notifications, onClear: _clearNotes),
                   ),
                 );
               },
@@ -1220,6 +1253,14 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _openVerifyReturn() async {
+    final msg = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const VerifyReturnScreen()),
+    );
+    if (msg != null && mounted) _snack(msg);
   }
 
   void _openRequests() => Navigator.push(
@@ -1266,9 +1307,13 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
 
     final books = _visibleBooks;
     final tx = _lib.transactions
-        .where((t) =>
-            _txFilter == 'All Statuses' ||
-            (_txFilter == 'Overdue' ? t.overdue : t.status == _txFilter))
+        .where((t) => switch (_txFilter) {
+              'All Statuses' => true,
+              'Overdue' => t.overdue,
+              'Not Returned' => !t.returned,
+              'Pending Return' => t.pendingReturn,
+              _ => t.returned,
+            })
         .toList();
     final all = _lib.books;
     final allStudents = AuthService.instance.borrowers;
@@ -1498,12 +1543,31 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           if (_tab == 2 && _borrowerView == 1) ...[
           // ---- Transactions ----
           SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _openVerifyReturn,
+              icon: const Icon(Icons.qr_code_scanner),
+              label: Badge(
+                isLabelVisible: _lib.transactions.any((t) => t.pendingReturn),
+                label: Text(
+                    '${_lib.transactions.where((t) => t.pendingReturn).length}'),
+                offset: const Offset(16, -8),
+                child: const Text('Verify Return'),
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: Palette.burgundy,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
             height: 40,
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
                 for (final f in const [
-                  'All Statuses', 'Not Returned', 'Overdue', 'Returned',
+                  'All Statuses', 'Not Returned', 'Pending Return', 'Overdue', 'Returned',
                 ])
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
@@ -1573,8 +1637,9 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
 // ---------- Notifications screen ----------
 
 class _NotificationsScreen extends StatefulWidget {
-  const _NotificationsScreen({required this.source});
+  const _NotificationsScreen({required this.source, required this.onClear});
   final List<(IconData, String, String, Color)> Function() source;
+  final VoidCallback onClear;
 
   @override
   State<_NotificationsScreen> createState() => _NotificationsScreenState();
@@ -1594,6 +1659,16 @@ class _NotificationsScreenState extends State<_NotificationsScreen> {
         title: const Text('Notifications',
             style: TextStyle(
                 fontFamily: 'Georgia', fontWeight: FontWeight.w700)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              widget.onClear();
+              setState(() {});
+            },
+            style: TextButton.styleFrom(foregroundColor: Palette.creamLight),
+            child: const Text('Clear all'),
+          ),
+        ],
       ),
       body: ListenableBuilder(
         listenable: LibraryService.instance,
@@ -3880,6 +3955,7 @@ class _DeclineDialog extends StatefulWidget {
 class _DeclineDialogState extends State<_DeclineDialog> {
   final _reason = TextEditingController();
   final _key = GlobalKey<FormState>();
+  String? _choice;
 
   @override
   void dispose() {
@@ -3905,18 +3981,35 @@ class _DeclineDialogState extends State<_DeclineDialog> {
                 style: const TextStyle(fontSize: 13),
               ),
               const SizedBox(height: 12),
-              TextFormField(
-                controller: _reason,
-                autofocus: true,
-                maxLines: 4,
-                maxLength: 300,
-                decoration: _fieldDec(
-                    label: 'Reason for declining',
-                    hint: 'e.g. This book is reserved for a class.'),
-                validator: (v) => (v ?? '').trim().length < 5
-                    ? 'Please enter a reason (at least 5 characters).'
-                    : null,
+              DropdownButtonFormField<String>(
+                value: _choice,
+                isExpanded: true,
+                decoration: _fieldDec(label: 'Reason for declining'),
+                items: [
+                  for (final r in _declineReasons)
+                    DropdownMenuItem(
+                      value: r,
+                      child: Text(r, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                validator: (v) => v == null ? 'Choose a reason.' : null,
+                onChanged: (v) => setState(() => _choice = v),
               ),
+              if (_choice == _otherReason) ...[
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _reason,
+                  autofocus: true,
+                  maxLines: 4,
+                  maxLength: 300,
+                  decoration: _fieldDec(
+                      label: 'Details',
+                      hint: 'Write the reason for the borrower.'),
+                  validator: (v) => (v ?? '').trim().length < 5
+                      ? 'Please enter a reason (at least 5 characters).'
+                      : null,
+                ),
+              ],
             ],
           ),
         ),
@@ -3928,7 +4021,9 @@ class _DeclineDialogState extends State<_DeclineDialog> {
         FilledButton(
           onPressed: () {
             if (_key.currentState!.validate()) {
-              Navigator.pop(context, _reason.text.trim());
+              Navigator.pop(
+                  context,
+                  _choice == _otherReason ? _reason.text.trim() : _choice);
             }
           },
           style: FilledButton.styleFrom(

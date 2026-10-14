@@ -32,6 +32,9 @@ class BookTransaction {
     required this.due,
     this.returnedOn,
     this.finePaid = false,
+    this.pendingReturn = false,
+    this.returnCode = '',
+    this.returnExpires,
   });
 
   final int id;
@@ -45,6 +48,9 @@ class BookTransaction {
   final DateTime due;
   final DateTime? returnedOn;
   final bool finePaid;
+  final bool pendingReturn;
+  final String returnCode;
+  final DateTime? returnExpires;
 
   bool get returned => returnedOn != null;
 
@@ -58,7 +64,8 @@ class BookTransaction {
   bool get overdue => !returned && daysOverdue > 0;
   double get fine => daysOverdue * LibraryService.finePerDay;
   double get fineOwed => finePaid ? 0 : fine;
-  String get status => returned ? 'Returned' : 'Not Returned';
+  String get status =>
+      returned ? 'Returned' : (pendingReturn ? 'Pending Return' : 'Not Returned');
 
   BookTransaction _copy({
     Book? book,
@@ -78,6 +85,9 @@ class BookTransaction {
         due: due,
         returnedOn: returnedOn ?? this.returnedOn,
         finePaid: finePaid ?? this.finePaid,
+        pendingReturn: pendingReturn,
+        returnCode: returnCode,
+        returnExpires: returnExpires,
       );
 
   BookTransaction markReturned(DateTime when) => _copy(returnedOn: when);
@@ -224,6 +234,10 @@ class LibraryService extends ChangeNotifier {
           due: DateTime.parse(r['due'] as String),
           returnedOn: _parseReturned(r['returned']),
           finePaid: r['finePaid'] == true,
+          pendingReturn: r['pendingReturn'] == true,
+          returnCode: (r['returnCode'] ?? '').toString(),
+          returnExpires:
+              DateTime.tryParse((r['returnExpires'] ?? '').toString())?.toLocal(),
         ));
       }
       _transactions
@@ -447,6 +461,61 @@ class LibraryService extends ChangeNotifier {
     }
     await reload();
     return null;
+  }
+
+  /// Borrower: generates a return QR/number. Returns an error message, or null.
+  Future<String?> requestReturn(int id) async {
+    final i = _transactions.indexWhere((t) => t.id == id);
+    if (i == -1) return 'Transaction not found.';
+    try {
+      final res = await http.put(
+        Uri.parse(
+            '${ApiConfig.baseUrl}/borrowings/${_transactions[i].remoteId}/return-request'),
+        headers: {'Authorization': 'Bearer ${AuthService.instance.token}'},
+      );
+      if (res.statusCode != 200) {
+        var msg = 'Could not start the return.';
+        try {
+          msg = (jsonDecode(res.body) as Map)['error']?.toString() ?? msg;
+        } catch (_) {}
+        return msg;
+      }
+    } catch (_) {
+      return 'Cannot reach the server.';
+    }
+    await reload();
+    return null;
+  }
+
+  /// Librarian: verifies a scanned QR or typed number.
+  /// Returns (error, summary). One of them is null.
+  Future<(String?, String?)> verifyReturn(String code) async {
+    try {
+      final res = await http.put(
+        Uri.parse('${ApiConfig.baseUrl}/borrowings/verify-return'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${AuthService.instance.token}',
+        },
+        body: jsonEncode({'code': code}),
+      );
+      Map body = {};
+      try {
+        body = jsonDecode(res.body) as Map;
+      } catch (_) {}
+      if (res.statusCode != 200) {
+        return ((body['error'] ?? 'Could not verify the code.').toString(), null);
+      }
+      final fine = (body['fine'] as num?)?.toDouble() ?? 0;
+      await reload();
+      return (
+        null,
+        'Returned "${body['title']}" by ${body['borrower']}.'
+            '${fine > 0 ? ' Fine due: ₱${fine.toStringAsFixed(2)}.' : ''}'
+      );
+    } catch (_) {
+      return ('Cannot reach the server.', null);
+    }
   }
 
   /// Used by the student side so both apps share one record.

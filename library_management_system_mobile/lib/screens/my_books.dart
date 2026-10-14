@@ -7,6 +7,7 @@ import 'package:library_management_system_mobile/models/book.dart';
 import 'package:library_management_system_mobile/screens/book_details.dart';
 import 'package:library_management_system_mobile/services/library_service.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
+import 'package:library_management_system_mobile/screens/return_qr.dart';
 import 'package:library_management_system_mobile/utils/confirm_dialog.dart';
 
 enum _Filter {
@@ -827,41 +828,11 @@ class _LoanCardState extends State<_LoanCard> {
   bool _returning = false;
 
   Future<void> _return() async {
-    final loan = widget.loan;
-    final messenger = ScaffoldMessenger.of(context);
-    final fine = loan.fine;
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Return this book?'),
-        content: Text(loan.isOverdue
-            ? '"${loan.book.title}" is ${loan.daysOverdue} ${loan.daysOverdue == 1 ? 'day' : 'days'} overdue. A fine of ₱${fine.toStringAsFixed(2)} applies.'
-            : 'Return "${loan.book.title}" to the library?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Return')),
-        ],
-      ),
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => ReturnQrScreen(txId: widget.loan.txId)),
     );
-    if (ok != true || !mounted) return;
-
-    setState(() => _returning = true);
-    final err = await BorrowStore.instance.giveBackLoan(loan);
-    if (mounted) setState(() => _returning = false);
-
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(err ??
-            (fine > 0
-                ? 'Returned "${loan.book.title}". Fine due: ₱${fine.toStringAsFixed(2)}.'
-                : 'Returned "${loan.book.title}".')),
-      ));
   }
 
     @override
@@ -871,7 +842,9 @@ class _LoanCardState extends State<_LoanCard> {
 
     final (statusLabel, statusColor) = loan.isReturned
         ? ('RETURNED', Palette.textMuted)
-        : loan.isOverdue
+        : loan.pendingReturn
+            ? ('PENDING RETURN', Palette.amber)
+            : loan.isOverdue
             ? ('OVERDUE', red)
             : ('BORROWED', Palette.slytherin);
 
@@ -946,7 +919,7 @@ class _LoanCardState extends State<_LoanCard> {
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white),
                     )
-                  : const Text('Return'),
+                  : Text(loan.pendingReturn ? 'Show Return QR' : 'Return Book'),
             ),
           ),
         ],
