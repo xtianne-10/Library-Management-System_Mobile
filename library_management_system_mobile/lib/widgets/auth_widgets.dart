@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:library_management_system_mobile/theme/palette.dart';
 
 /// Crest + "Hogwarts Library" title used on login and sign up.
-/// To use your real crest, replace the Icon with
-/// Image.asset('assets/crest.webp', ...) and register it in pubspec.yaml.
 class AuthBrand extends StatelessWidget {
   const AuthBrand({super.key, required this.color});
   final Color color;
@@ -13,15 +11,23 @@ class AuthBrand extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(Icons.shield_outlined, size: 64, color: color),
+        Image.asset(
+          'assets/images/crest.webp',
+          width: 80,
+          height: 96,
+          fit: BoxFit.contain,
+          semanticLabel: 'Hogwarts crest',
+        ),
         const SizedBox(width: 14),
-        Text(
-          'Hogwarts\nLibrary',
-          style: TextStyle(
-            fontSize: 38,
-            height: 0.95,
-            color: color,
-            fontFamily: 'Georgia',
+        Flexible(
+          child: Text(
+            'Hogwarts\nLibrary',
+            style: TextStyle(
+              fontSize: 38,
+              height: 0.95,
+              color: color,
+              fontFamily: 'Georgia',
+            ),
           ),
         ),
       ],
