@@ -1400,7 +1400,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               icon: Badge(
                 isLabelVisible: _lib.pendingRequests.isNotEmpty,
                 label: Text('${_lib.pendingRequests.length}'),
-                child: const Icon(Icons.how_to_reg,
+                child: const Icon(Icons.pending_actions,
                     color: Palette.creamLight, size: 26),
               ),
             ),
@@ -3393,7 +3393,8 @@ class _ImportSheetState extends State<_ImportSheet> {
       setState(() {
         _fileName = name;
         _rows = [];
-        _fileError = 'Missing column(s): ${missing.join(', ')}.';
+        _fileError =
+            'The header row is missing: ${missing.join(', ')}. Add them exactly as named in the template.';
       });
       return;
     }
@@ -3401,6 +3402,14 @@ class _ImportSheetState extends State<_ImportSheet> {
     String cellOf(List<String> r, String key) {
       final i = head[key];
       return (i == null || i >= r.length) ? '' : r[i].trim();
+    }
+
+    String colLetter(int n) {
+      var s = '';
+      for (n += 1; n > 0; n = (n - 1) ~/ 26) {
+        s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+      }
+      return s;
     }
 
     String keyOf(String t, String a) => '${t.toLowerCase()}|${a.toLowerCase()}';
@@ -3424,51 +3433,81 @@ class _ImportSheetState extends State<_ImportSheet> {
       final title = cellOf(r, 'title');
       final row = _ImportRow(i + 2, title.isEmpty ? '(no title)' : title);
 
-      void check(String? e) {
-        if (e != null) row.errors.add(e);
+      const labels = {
+        'title': 'Title', 'author': 'Author', 'isbn': 'ISBN',
+        'publisher': 'Publisher', 'category': 'Category',
+        'published': 'Published date', 'pages': 'Pages', 'copies': 'Copies',
+        'description': 'Description', 'image': 'Image link',
+        'subcategory': 'Subcategory', 'shelf': 'Shelf',
+      };
+
+      String where(String column) {
+        final idx = head[column];
+        final name = labels[column] ?? column;
+        return idx == null ? name : '$name (cell ${colLetter(idx)}${row.line})';
       }
 
-      check(Validators.bookTitle(title));
+      String seenOf(String column) {
+        final raw = cellOf(r, column);
+        return raw.isEmpty ? '' : ' You entered "$raw".';
+      }
+
+      void err(String column, String msg) {
+        row.errors
+            .add('Row ${row.line}, ${where(column)}: $msg${seenOf(column)}');
+      }
+
+      void check(String column, String? e) {
+        if (e != null) err(column, e);
+      }
+
+      String at(String column, String msg, {String? seen}) =>
+          'Row ${row.line}, ${where(column)}: $msg${seen ?? seenOf(column)}';
+
+      check('title', Validators.bookTitle(title));
       final author = cellOf(r, 'author');
-      check(Validators.bookAuthor(author));
+      check('author', Validators.bookAuthor(author));
       final publisher = cellOf(r, 'publisher');
-      check(Validators.publisher(publisher));
+      check('publisher', Validators.publisher(publisher));
 
       final catRaw = cellOf(r, 'category');
       final category = _categories.firstWhere(
           (c) => c.toLowerCase() == catRaw.toLowerCase(),
           orElse: () => '');
       if (category.isEmpty) {
-        row.errors.add('Category must be one of: ${_categories.join(', ')}.');
+        err('category', 'Must be one of: ${_categories.join(', ')}.');
       }
 
       final pubRaw = cellOf(r, 'published');
       final published = _parseUsDate(pubRaw);
-      check(Validators.publishedDate(published));
-      if (published == null && pubRaw.isNotEmpty) {
-        row.errors.add('Use the date format MM/DD/YYYY.');
+      if (pubRaw.isEmpty) {
+        err('published', 'Pick a publish date.');
+      } else if (published == null) {
+        err('published', 'Use the date format MM/DD/YYYY.');
+      } else {
+        check('published', Validators.publishedDate(published));
       }
 
       final copiesRaw = cellOf(r, 'copies');
       final copies = copiesRaw.isEmpty ? '1' : copiesRaw;
-      check(Validators.copies(copies));
+      check('copies', Validators.copies(copies));
 
       final desc = cellOf(r, 'description');
-      check(_validateDescription(desc));
+      check('description', _validateDescription(desc));
       final isbn = _cleanIsbn(cellOf(r, 'isbn'));
-      check(_validateIsbn(isbn));
+      check('isbn', _validateIsbn(isbn));
       final pagesRaw = cellOf(r, 'pages');
-      check(_validatePages(pagesRaw));
+      check('pages', _validatePages(pagesRaw));
       final shelf = cellOf(r, 'shelf');
       final image = cellOf(r, 'image');
-      check(Validators.imageUrl(image));
+      check('image', Validators.imageUrl(image));
 
       final sub = cellOf(r, 'subcategory');
       if (sub.length > 40) {
-        row.errors.add('Subcategory must be 40 characters or fewer.');
+        err('subcategory', 'Must be 40 characters or fewer.');
       } else if (sub.isNotEmpty &&
           !RegExp(r"^[\p{L}\p{N}\s&'-]+$", unicode: true).hasMatch(sub)) {
-        row.errors.add("Subcategory: use letters, numbers, spaces, & ' - only.");
+        err('subcategory', "Use letters, numbers, spaces, & ' - only.");
       }
 
       // 1) Invalid
@@ -3480,10 +3519,15 @@ class _ImportSheetState extends State<_ImportSheet> {
 
       // 2) Repeated inside this file
       final tKey = keyOf(title, author);
-      final prior = fileSeen[isbn] ?? fileSeen[tKey];
+      final priorByIsbn = fileSeen[isbn];
+      final prior = priorByIsbn ?? fileSeen[tKey];
       if (prior != null) {
         row.status = _RowStatus.duplicate;
-        row.note = 'Same book as row $prior in this file.';
+        row.note = priorByIsbn != null
+            ? at('isbn', 'This ISBN is already used in row $prior of this file.')
+            : at('title',
+                'Row $prior in this file has the same title and author.',
+                seen: ' You entered "$title" by "$author".');
         out.add(row);
         continue;
       }
@@ -3492,8 +3536,8 @@ class _ImportSheetState extends State<_ImportSheet> {
       final byI = byIsbn[isbn];
       final byT = byTitle[tKey];
       if (byI != null && byT != null && byI.id != byT.id) {
-        row.errors.add(
-            'The ISBN matches one catalog book but the title and author match another.');
+        err('isbn',
+            'This ISBN belongs to one book in the catalog, but the title and author belong to a different book. Check which one you mean.');
         row.status = _RowStatus.invalid;
         out.add(row);
         continue;
@@ -3529,7 +3573,7 @@ class _ImportSheetState extends State<_ImportSheet> {
       final n = copiesRaw.isEmpty ? match.totalCopies : int.parse(copies);
       final borrowed = lib.activeFor(match);
       if (n < borrowed) {
-        row.errors.add(
+        err('copies',
             '$borrowed copies are currently borrowed. Total copies can\'t be lower than that.');
         row.status = _RowStatus.invalid;
         out.add(row);
@@ -3575,7 +3619,12 @@ class _ImportSheetState extends State<_ImportSheet> {
       );
       if (row.changes.isEmpty) {
         row.status = _RowStatus.duplicate;
-        row.note = 'Already in the catalog with the same details.';
+        row.note = byI != null
+            ? at('isbn',
+                'This book is already in the catalog with the same details, so there is nothing to update.')
+            : at('title',
+                'This book is already in the catalog with the same details, so there is nothing to update.',
+                seen: ' You entered "$title" by "$author".');
       } else {
         row.status = _RowStatus.update;
       }
@@ -3595,7 +3644,7 @@ class _ImportSheetState extends State<_ImportSheet> {
   Widget _rowTile(_ImportRow r) {
     final (label, color, _) = _statusMeta(r.status);
     final detail = switch (r.status) {
-      _RowStatus.invalid => r.errors.join(' '),
+      _RowStatus.invalid => r.errors.join('\n'),
       _RowStatus.update => 'Will change: ${r.changes.join(', ')}.',
       _RowStatus.duplicate => r.note,
       _RowStatus.newBook => 'Will be added to the catalog.',
@@ -4006,7 +4055,7 @@ class _ImportSheetState extends State<_ImportSheet> {
 // (column, required?, rule, example)
 const _guide = <(String, bool, String, String)>[
   ('title', true, '2 to 100 characters', 'The Hobbit'),
-  ('author', true, 'Letters only, up to 60', 'J.R.R. Tolkien'),
+  ('author', true, 'Letters and numbers, up to 60', 'J.R.R. Tolkien'),
   ('isbn', true, '10 or 13 digits (used to match existing books)', '9780547928227'),
   ('publisher', true, 'Up to 60 characters', 'Allen & Unwin'),
   ('category', true, 'Pick from the list below', 'Fiction'),
@@ -5260,19 +5309,6 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
         scoped.where((r) => _deptCat == 'All' || r.category == _deptCat),
         (r) => r.dept);
 
-    // 6. Unique borrowers by department
-    final uniq = <String, Set<String>>{};
-    for (final r in scoped) {
-      uniq.putIfAbsent(r.dept, () => {}).add(r.email);
-    }
-    final uniqueByDept = [
-      for (final e in uniq.entries)
-        _ChartRow(e.key, e.value.length.toDouble())
-    ]..sort((a, b) {
-        final c = b.value.compareTo(a.value);
-        return c != 0 ? c : a.label.compareTo(b.label);
-      });
-
     // 7. Engagement
     bool roleOk(bool faculty) =>
         _role == 'all' || (_role == 'faculty') == faculty;
@@ -5492,13 +5528,6 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
             ),
           ],
           child: _Donut(rows: byDept),
-        ),
-
-        _ChartCard(
-          title: 'Unique Borrowers by Department',
-          purpose:
-              'Distinct people who borrowed at least once. Repeat loans count once.',
-          child: _VBars(rows: uniqueByDept, color: const Color(0xFF0C7A43)),
         ),
 
         _ChartCard(

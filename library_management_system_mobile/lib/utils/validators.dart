@@ -75,8 +75,9 @@ class Validators {
   static String? bookAuthor(String? v) {
     final s = (v ?? '').trim();
     if (s.isEmpty) return 'Author name is required.';
-    if (!RegExp(r"^\p{L}[\p{L}\s.'-]*$", unicode: true).hasMatch(s)) {
-      return 'Use letters only.';
+    if (!RegExp(r"^[\p{L}\p{N}][\p{L}\p{N}\s.,'&-]*$", unicode: true)
+        .hasMatch(s)) {
+      return "Use letters, numbers, spaces and . , & ' - only.";
     }
     if (s.length > 60) return 'Keep it under 60 characters.';
     return null;
