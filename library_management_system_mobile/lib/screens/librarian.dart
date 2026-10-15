@@ -27,7 +27,7 @@ Future<bool> _confirmDiscard(BuildContext context, bool dirty) async {
       danger: true);
 }
 
-const _categories = ['Fiction', 'Non-Fiction', 'Academic', 'Restricted'];
+const _categories = ['Fiction', 'Non-Fiction', 'Academic'];
 
 const _otherReason = 'Other';
 const _declineReasons = [

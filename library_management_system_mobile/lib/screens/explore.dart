@@ -33,7 +33,6 @@ Color _categoryColor(String c) => switch (c) {
       'Fiction' => const Color(0xFFE99B1C),
       'Non-Fiction' => const Color(0xFFC0151F),
       'Academic' => const Color(0xFF0E3F8A),
-      'Restricted' => const Color(0xFF0A7A46),
       _ => Palette.burgundy,
     };
 
@@ -428,7 +427,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     }
 
     // Same four categories the web uses
-    const categories = ['All', 'Fiction', 'Non-Fiction', 'Academic', 'Restricted'];
+    const categories = ['All', 'Fiction', 'Non-Fiction', 'Academic'];
     // Reset the sub-filter and page whenever the filters change (like the web)
     if (_category != _lastCategory) {
       _lastCategory = _category;
