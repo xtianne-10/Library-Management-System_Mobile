@@ -42,6 +42,44 @@ const _declineReasons = [
 
 String _cleanIsbn(String s) => s.replaceAll(RegExp(r'[\s-]'), '').toUpperCase();
 
+// ---------- CSV export ----------
+String _csvCell(Object? v) {
+  var s = v == null ? '' : '$v';
+  if (RegExp(r'^[=+\-@\t\r]').hasMatch(s) &&
+      !RegExp(r'^[+-]?[\d\s().-]+$').hasMatch(s)) {
+    s = "'$s";
+  }
+  return RegExp(r'[",\n\r]').hasMatch(s) ? '"${s.replaceAll('"', '""')}"' : s;
+}
+
+String _day(DateTime? d) =>
+    d == null ? '' : d.toIso8601String().substring(0, 10);
+
+String _usDate(DateTime? d) => d == null
+    ? ''
+    : '${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}/${d.year}';
+
+class _DownloadButton extends StatelessWidget {
+  const _DownloadButton({required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => FilledButton.icon(
+        onPressed: onPressed,
+        icon: const Icon(Icons.download, size: 18),
+        label: const Text('Download'),
+        style: FilledButton.styleFrom(
+          backgroundColor: const Color(0xFF0C7A43),
+          foregroundColor: Colors.white,
+          visualDensity: VisualDensity.compact,
+          textStyle:
+              const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+}
+
 // MM/DD/YYYY (or M/D/YYYY, also with dashes) -> DateTime, or null if invalid
 DateTime? _parseUsDate(String s) {
   final m = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$').firstMatch(s.trim());
@@ -975,6 +1013,103 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
     ];
   }
 
+  Future<void> _exportCsv(
+      String name, List<String> head, List<List<Object?>> rows) async {
+    if (rows.isEmpty) {
+      _snack('Nothing to export.');
+      return;
+    }
+    final text =
+        [head, ...rows].map((r) => r.map(_csvCell).join(',')).join('\r\n');
+    final file = '${name}_${_day(DateTime.now())}.csv';
+    try {
+      // BOM so Excel reads the file as UTF-8.
+      final bytes = Uint8List.fromList([0xEF, 0xBB, 0xBF, ...utf8.encode(text)]);
+      await downloadFile(bytes, file, 'text/csv');
+      if (!mounted) return;
+      _snack('Exported ${rows.length} ${rows.length == 1 ? 'row' : 'rows'} to $file');
+    } catch (e) {
+      if (!mounted) return;
+      _snack('Could not export: $e');
+    }
+  }
+
+  // Same column names as the Bulk Import template, so this file can be re-imported.
+  void _exportBooks(List<Book> list) => _exportCsv(
+        'books',
+        [
+          'Title', 'Author', 'ISBN', 'Publisher', 'Category', 'Published',
+          'Copies', 'Pages', 'Description', 'Image', 'Subcategory', 'Shelf',
+          'Available Copies',
+        ],
+        [
+          for (final b in list)
+            [
+              b.title,
+              b.author,
+              b.isbn,
+              b.publisher,
+              b.category,
+              _usDate(b.published),
+              b.totalCopies,
+              b.pages,
+              b.description,
+              b.imageBytes != null ? '' : b.imageUrl,
+              b.subcategory,
+              b.shelf,
+              _lib.copiesLeft(b),
+            ],
+        ],
+      );
+
+  void _exportTransactions(List<BookTransaction> list) => _exportCsv(
+        'transactions',
+        [
+          'Title', 'Borrower', 'Borrower Email', 'Borrowed On', 'Due Date',
+          'Return Date', 'Status', 'Days Overdue', 'Fine (PHP)', 'Fine Paid',
+        ],
+        [
+          for (final t in list)
+            [
+              t.title,
+              t.borrower,
+              t.borrowerEmail,
+              _day(t.borrowedOn),
+              _day(t.due),
+              _day(t.returnedOn),
+              t.overdue ? 'Overdue' : t.status,
+              t.daysOverdue,
+              t.fine.toStringAsFixed(2),
+              t.fine > 0 ? (t.finePaid ? 'Yes' : 'No') : '',
+            ],
+        ],
+      );
+
+  void _exportBorrowers(List<AppUser> list) => _exportCsv(
+        'borrowers',
+        [
+          'Full Name', 'Email', 'ID Number', 'Role', 'Course / Department',
+          'Year Level', 'Phone', 'Active Loans', 'Overdue Loans',
+          'Unpaid Fines (PHP)', 'Total Borrowed',
+        ],
+        [
+          for (final s in list)
+            [
+              s.fullName,
+              s.email,
+              s.idNumber,
+              _isFaculty(s) ? 'Professor' : 'Student',
+              _isFaculty(s) ? s.department : s.course,
+              s.yearLevel,
+              s.phone,
+              _lib.activeLoansOf(s.email).length,
+              _lib.activeLoansOf(s.email).where((t) => t.overdue).length,
+              _lib.finesOutstanding(s.email).toStringAsFixed(2),
+              _lib.recordsOf(s.email).length,
+            ],
+        ],
+      );
+
   void _snack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
@@ -1562,7 +1697,13 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           if (_tab == 0) ..._overview(stats),
           if (_tab == 1) ...[
           // ---- Catalog ----
-          const _Section('Book Catalog', Icons.menu_book),
+          Row(
+            children: [
+              const Expanded(child: _Section('Book Catalog', Icons.menu_book)),
+              const SizedBox(width: 8),
+              _DownloadButton(onPressed: () => _exportBooks(books)),
+            ],
+          ),
           const SizedBox(height: 10),
           if (_lib.loadError != null)
             Padding(
@@ -1699,7 +1840,17 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
 
           ],
           if (_tab == 2) ...[
-          const _Section('Borrowers', Icons.groups),
+          Row(
+            children: [
+              const Expanded(child: _Section('Borrowers', Icons.groups)),
+              const SizedBox(width: 8),
+              _DownloadButton(
+                onPressed: _borrowerView == 0
+                    ? () => _exportBorrowers(foundStudents)
+                    : () => _exportTransactions(tx),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
