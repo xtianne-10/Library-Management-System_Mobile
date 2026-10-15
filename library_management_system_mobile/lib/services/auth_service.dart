@@ -302,6 +302,34 @@ class AuthService extends ChangeNotifier {
     return null;
   }
 
+
+  /// Forgot password: verifies email + ID on the server. Returns an error message, or null on success.
+  Future<String?> resetPassword({
+    required String email,
+    required String idNumber,
+    required String newPassword,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/auth/forgot-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': _norm(email),
+          'idNumber': idNumber.trim(),
+          'newPassword': newPassword,
+        }),
+      );
+      if (res.statusCode == 200) return null;
+      Map? data;
+      try {
+        data = jsonDecode(res.body) as Map;
+      } catch (_) {}
+      return (data?['error'] as String?) ?? 'Could not reset password.';
+    } catch (_) {
+      return 'Cannot reach the server.';
+    }
+  }
+
   /// Head librarian only. Returns an error message, or null on success.
   Future<String?> addLibrarian({
     required String firstName,
