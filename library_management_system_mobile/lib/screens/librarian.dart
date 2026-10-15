@@ -60,27 +60,47 @@ String _usDate(DateTime? d) => d == null
     : '${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}/${d.year}';
 
 class _DownloadButton extends StatelessWidget {
-  const _DownloadButton({required this.onPressed});
+  const _DownloadButton({required this.onPressed, this.iconOnly = false});
   final VoidCallback onPressed;
+  final bool iconOnly;
 
   @override
-  Widget build(BuildContext context) => FilledButton.icon(
+  Widget build(BuildContext context) {
+    const green = Color(0xFF0C7A43);
+    if (iconOnly) {
+      return IconButton.filled(
+        tooltip: 'Download',
         onPressed: onPressed,
         icon: const Icon(Icons.download, size: 18),
-        label: const Text('Download'),
-        style: FilledButton.styleFrom(
-          backgroundColor: const Color(0xFF0C7A43),
+        visualDensity: VisualDensity.compact,
+        style: IconButton.styleFrom(
+          backgroundColor: green,
           foregroundColor: Colors.white,
-          visualDensity: VisualDensity.compact,
-          textStyle:
-              const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          minimumSize: const Size(36, 36),
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)),
+              borderRadius: BorderRadius.circular(8)),
         ),
       );
+    }
+    return FilledButton.icon(
+      onPressed: onPressed,
+      icon: const Icon(Icons.download, size: 16),
+      label: const Text('Download'),
+      style: FilledButton.styleFrom(
+        backgroundColor: green,
+        foregroundColor: Colors.white,
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        minimumSize: const Size(0, 32),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+  }
 }
 
-// MM/DD/YYYY (or M/D/YYYY, also with dashes) -> DateTime, or null if invalid
 DateTime? _parseUsDate(String s) {
   final m = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$').firstMatch(s.trim());
   if (m == null) return null;
@@ -355,6 +375,33 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
   String _txFilter = 'All Statuses';
   String _studentQuery = '';
   int _borrowerView = 0; // 0 = Lookup, 1 = Transactions
+  String _txSortKey = 'borrowedOn';
+  bool _txAsc = false; // newest first, same default as the web
+
+  static const _txSortOptions = {
+    'title': 'Title',
+    'borrower': 'Borrower',
+    'borrowedOn': 'Borrowed On',
+    'due': 'Due',
+    'returned': 'Return Date',
+    'status': 'Status',
+    'fine': 'Fine',
+  };
+
+  int _cmpTx(BookTransaction a, BookTransaction b) {
+    final c = switch (_txSortKey) {
+      'title' => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+      'borrower' =>
+        a.borrower.toLowerCase().compareTo(b.borrower.toLowerCase()),
+      'due' => a.due.compareTo(b.due),
+      'returned' => (a.returnedOn ?? DateTime(0))
+          .compareTo(b.returnedOn ?? DateTime(0)),
+      'status' => a.status.compareTo(b.status),
+      'fine' => a.fine.compareTo(b.fine),
+      _ => (a.borrowedOn ?? DateTime(0)).compareTo(b.borrowedOn ?? DateTime(0)),
+    };
+    return _txAsc ? c : -c;
+  }
 
   final Set<String> _seenNotes = {};
   final Set<String> _clearedNotes = {};
@@ -1625,7 +1672,8 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
               'Pending Return' => t.pendingReturn,
               _ => t.returned,
             })
-        .toList();
+        .toList()
+      ..sort(_cmpTx);
     final all = _lib.books;
     final allStudents = AuthService.instance.borrowers;
     final sq = _studentQuery.trim().toLowerCase();
@@ -1840,17 +1888,7 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
 
           ],
           if (_tab == 2) ...[
-          Row(
-            children: [
-              const Expanded(child: _Section('Borrowers', Icons.groups)),
-              const SizedBox(width: 8),
-              _DownloadButton(
-                onPressed: _borrowerView == 0
-                    ? () => _exportBorrowers(foundStudents)
-                    : () => _exportTransactions(tx),
-              ),
-            ],
-          ),
+          const _Section('Borrowers', Icons.groups),
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
@@ -1873,14 +1911,22 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           ],
           if (_tab == 2 && _borrowerView == 0) ...[
           // ---- Student lookup ----
-          TextField(
-            onChanged: (v) => setState(() {
-              _studentQuery = v;
-              _studentPage = 0;
-            }),
-            decoration: _fieldDec(
-                hint: 'Search by name, email, or phone',
-                prefix: const Icon(Icons.person_search)),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  onChanged: (v) => setState(() {
+                    _studentQuery = v;
+                    _studentPage = 0;
+                  }),
+                  decoration: _fieldDec(
+                      hint: 'Search by name, email, or phone',
+                      prefix: const Icon(Icons.person_search)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _DownloadButton(onPressed: () => _exportBorrowers(foundStudents)),
+            ],
           ),
           const SizedBox(height: 12),
           if (foundStudents.isEmpty)
@@ -1907,25 +1953,6 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
           ],
           if (_tab == 2 && _borrowerView == 1) ...[
           // ---- Transactions ----
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _openVerifyReturn,
-              icon: const Icon(Icons.qr_code_scanner),
-              label: Badge(
-                isLabelVisible: _lib.transactions.any((t) => t.pendingReturn),
-                label: Text(
-                    '${_lib.transactions.where((t) => t.pendingReturn).length}'),
-                offset: const Offset(16, -8),
-                child: const Text('Verify Return'),
-              ),
-              style: FilledButton.styleFrom(
-                backgroundColor: Palette.burgundy,
-                foregroundColor: Colors.white,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
           SizedBox(
             height: 40,
             child: ListView(
@@ -1966,6 +1993,61 @@ class _LibrarianScreenState extends State<LibrarianScreen> {
                   ),
               ],
             ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _txSortKey,
+                  isExpanded: true,
+                  decoration: _fieldDec(label: 'Sort by'),
+                  items: [
+                    for (final e in _txSortOptions.entries)
+                      DropdownMenuItem(value: e.key, child: Text(e.value)),
+                  ],
+                  onChanged: (v) => setState(() {
+                    _txSortKey = v ?? 'borrowedOn';
+                    _txPage = 0;
+                  }),
+                ),
+              ),
+              const SizedBox(width: 6),
+              IconButton.outlined(
+                tooltip: _txAsc ? 'A to Z' : 'Z to A',
+                icon: Icon(_txAsc ? Icons.arrow_upward : Icons.arrow_downward),
+                onPressed: () => setState(() {
+                  _txAsc = !_txAsc;
+                  _txPage = 0;
+                }),
+              ),
+              const SizedBox(width: 6),
+              _DownloadButton(
+                iconOnly: true,
+                onPressed: () => _exportTransactions(tx),
+              ),
+              const SizedBox(width: 6),
+              FilledButton.icon(
+                onPressed: _openVerifyReturn,
+                icon: Badge(
+                  isLabelVisible: _lib.transactions.any((t) => t.pendingReturn),
+                  label: Text(
+                      '${_lib.transactions.where((t) => t.pendingReturn).length}'),
+                  child: const Icon(Icons.qr_code_scanner, size: 18),
+                ),
+                label: const Text('Verify'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Palette.burgundy,
+                  foregroundColor: Colors.white,
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: const Size(0, 36),
+                  textStyle: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           if (tx.isEmpty)
@@ -5261,10 +5343,12 @@ class _AnRec {
 }
 
 class _ChartRow {
-  _ChartRow(this.label, this.value, [this.sub = '']);
+  _ChartRow(this.label, this.value,
+      [this.sub = '', this.borrowers = 0, this.total = 0]);
   final String label;
   final double value;
   final String sub;
+  final int borrowers, total;
 }
 
 List<_ChartRow> _tally(Iterable<_AnRec> list, String Function(_AnRec) key) {
@@ -5478,7 +5562,7 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
         () {
           final b = borrowersIn[e.key]?.length ?? 0;
           return _ChartRow(e.key, (b / e.value * 1000).round() / 10,
-              '($b of ${e.value})');
+              '($b of ${e.value})', b, e.value);
         }()
     ]..sort((a, b) {
         final c = b.value.compareTo(a.value);
@@ -5495,11 +5579,129 @@ class _AnalyticsSectionState extends State<_AnalyticsSection> {
         ? _fmt(start)
         : '${_fmt(start)} to ${_fmt(end)}';
 
+    Future<void> exportAnalytics() async {
+      String line(List<Object?> cells) => cells.map(_csvCell).join(',');
+      double sum(List<_ChartRow> l) =>
+          l.fold<double>(0, (s, r) => s + r.value);
+      String share(double v, double t) =>
+          t > 0 ? '${(v / t * 100).toStringAsFixed(1)}%' : '0.0%';
+      String two(int n) => n.toString().padLeft(2, '0');
+
+      List<String> block(String title, List<String> header, List<String> body) =>
+          [
+            line([title]),
+            line(header),
+            if (body.isEmpty)
+              line(['No data for the selected filters'])
+            else
+              ...body,
+            '',
+          ];
+
+      List<String> shareBody(List<_ChartRow> rows) {
+        if (rows.isEmpty) return [];
+        final total = sum(rows);
+        return [
+          for (final r in rows)
+            line([r.label, r.value.toInt(), share(r.value, total)]),
+          line(['Total', total.toInt(), '100.0%']),
+        ];
+      }
+
+      Book? bookOf(String title) {
+        for (final b in books) {
+          if (b.title == title) return b;
+        }
+        return null;
+      }
+
+      final now = DateTime.now();
+      final roleLabel =
+          {'all': 'All users', 'student': 'Students', 'faculty': 'Faculty'}[_role];
+
+      final out = <String>[
+        line(['Hogwarts Library - Analytics Report']),
+        line(['Report period', rangeText]),
+        line(['Date basis', 'Borrow date']),
+        line(['Generated on', '${_fmt(now)} ${two(now.hour)}:${two(now.minute)}']),
+        '',
+        ...block('SUMMARY', ['Metric', 'Value'],
+            [for (final k in kpis) line([k.$1, k.$2])]),
+        ...block(
+          'BORROWING TRENDS ($unit; Category: $_trendCat; Department: $_trendDept)',
+          ['Period', 'Period Start', 'Period End', 'Borrowings'],
+          trendTotal == 0
+              ? []
+              : [
+                  for (var i = 0; i < buckets.length; i++)
+                    line([
+                      buckets[i].label,
+                      _fmt(buckets[i].start),
+                      _fmt(buckets[i].end),
+                      trendValues[i].toInt(),
+                    ]),
+                  line(['Total', '', '', trendTotal.toInt()]),
+                ],
+        ),
+        ...block(
+          'TOP BORROWED BOOKS (Category: $_bookCat; Subcategory: $_bookSub; Top $_bookTop)',
+          ['Rank', 'Title', 'Author', 'Category', 'Subcategory', 'Times Borrowed'],
+          [
+            for (var i = 0; i < topBooks.length; i++)
+              line([
+                i + 1,
+                topBooks[i].label,
+                bookOf(topBooks[i].label)?.author ?? '',
+                bookOf(topBooks[i].label)?.category ?? '',
+                bookOf(topBooks[i].label)?.subcategory ?? '',
+                topBooks[i].value.toInt(),
+              ]),
+          ],
+        ),
+        ...block('BORROWING BY CATEGORY',
+            ['Category', 'Borrowings', 'Share of Total'], shareBody(byCategory)),
+        ...block('BORROWING BY SUBCATEGORY (Category: $_subCat; Top $_subTop)',
+            ['Subcategory', 'Borrowings', 'Share of Listed'], shareBody(bySub)),
+        ...block('BORROWING BY ACADEMIC DEPARTMENT (Category: $_deptCat)',
+            ['Department / Course', 'Borrowings', 'Share of Total'],
+            shareBody(byDept)),
+        ...block(
+          'BORROWING ENGAGEMENT BY DEPARTMENT (Users: $roleLabel)',
+          ['Department / Course', 'Unique Borrowers', 'Registered Users', 'Engagement Rate'],
+          [
+            for (final r in engagement)
+              line([r.label, r.borrowers, r.total, '${r.value.toStringAsFixed(1)}%']),
+          ],
+        ),
+      ];
+
+      final file = 'analytics_${_day(start)}_to_${_day(end)}.csv';
+      final messenger = ScaffoldMessenger.of(context);
+      try {
+        // BOM so Excel reads the file as UTF-8.
+        final bytes = Uint8List.fromList(
+            [0xEF, 0xBB, 0xBF, ...utf8.encode(out.join('\r\n'))]);
+        await downloadFile(bytes, file, 'text/csv');
+        messenger.showSnackBar(SnackBar(content: Text('Exported analytics to $file')));
+      } catch (e) {
+        messenger.showSnackBar(SnackBar(content: Text('Could not export: $e')));
+      }
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(rangeText,
-            style: const TextStyle(color: Palette.textMuted, fontSize: 13)),
+        Row(
+          children: [
+            Expanded(
+              child: Text(rangeText,
+                  style: const TextStyle(
+                      color: Palette.textMuted, fontSize: 13)),
+            ),
+            const SizedBox(width: 8),
+            _DownloadButton(onPressed: exportAnalytics),
+          ],
+        ),
         const SizedBox(height: 10),
 
         // Date range pills
